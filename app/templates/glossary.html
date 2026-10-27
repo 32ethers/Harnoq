@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}{{ _('术语表 · Harnoq') }}{% endblock %}
+{% block content %}
+<div id="glossary-page" data-project-id="{{ project_id }}">
+  <p class="breadcrumb"><a href="{{ url_for('web.project_detail', project_id=project_id) }}">{{ _('← 返回项目') }}</a></p>
+  {% include "_project_flow_nav.html" %}
+  <h1>{{ _('术语表') }} <span id="gl-count" class="count">0</span></h1>
+  <button id="gl-create-btn" class="primary-button" type="button">{{ _('添加术语') }}</button>
+  <div id="gl-status" class="loading" role="status">{{ _('正在加载术语表...') }}</div>
+  <div id="gl-error" class="error hidden" role="alert"></div>
+  <div id="gl-content" class="hidden" aria-live="polite">
+    <div id="gl-table-section"></div>
+  </div>
+
+  <div id="gl-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="gl-modal-title">
+    <div class="modal modal-wide">
+      <h2 id="gl-modal-title"></h2>
+      <form id="gl-modal-form" class="modal-form" novalidate>
+        <label for="gl-term-native">{{ _('母语词') }}</label>
+        <input type="text" id="gl-term-native" name="term_native" required autocomplete="off">
+        <label for="gl-term-en">{{ _('英文') }}</label>
+        <input type="text" id="gl-term-en" name="term_en" required autocomplete="off">
+        <label for="gl-definition-en">{{ _('解释（英文）') }}</label>
+        <textarea id="gl-definition-en" name="definition_en"></textarea>
+        <label for="gl-avoid">{{ _('别人会写错的那个词（每行一个；填的是会被打出来的') }}<b>{{ _('词') }}</b>{{ _('，通常是被一词两用的泛称。填不出、或只能填另一条术语的名字，这条就不该入表）') }}</label>
+        <textarea id="gl-avoid" name="avoid"></textarea>
+        <span id="gl-modal-error" class="form-error" role="alert"></span>
+        <div class="modal-actions">
+          <button type="button" id="gl-modal-cancel">{{ _('取消') }}</button>
+          <button type="submit" id="gl-modal-submit">{{ _('保存') }}</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

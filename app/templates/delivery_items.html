@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}{{ _(page_title) }} · Harnoq{% endblock %}
+{% block content %}
+<div id="delivery-page" data-project-id="{{ project_id }}" data-project-number="{{ project_number }}" data-page-kind="{{ page_kind }}"
+     data-record-family="{{ 'INTEG' if page_kind == 'integration' else 'SYS' }}"
+     data-record-label="{{ _('集成事项') if page_kind == 'integration' else _('系统事项') }}">
+  <p class="breadcrumb"><a href="{{ url_for('web.project_detail', project_id=project_id) }}">{{ _('← 返回项目') }}</a></p>
+  {% include "_project_flow_nav.html" %}
+  <h1>{{ _(page_title) }}</h1>
+  <p class="hint">{{ _(page_hint) }}</p>
+  <p id="delivery-run-info" class="summary hidden"></p>
+
+  <div id="delivery-counts" class="delivery-counts"></div>
+
+  <div class="actions">
+    <button id="delivery-create-btn" class="primary-button" type="button">{{ _('添加') }}</button>
+  </div>
+  <div id="delivery-load-status" class="loading" role="status">{{ _('正在加载...') }}</div>
+  <div id="delivery-error" class="error hidden" role="alert"></div>
+  <div id="delivery-content" class="hidden" aria-live="polite">
+    <div id="delivery-table-section"></div>
+  </div>
+
+  <div id="delivery-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="delivery-modal-title">
+    <div class="modal modal-wide">
+      <h2 id="delivery-modal-title"></h2>
+      <form id="delivery-modal-form" class="modal-form" novalidate>
+        <label for="delivery-kind">{{ _('类型（kind）') }}</label>
+        <select id="delivery-kind" name="kind" required>
+          {% for value, label in kind_options %}
+          <option value="{{ value }}">{{ _(label) }}</option>
+          {% endfor %}
+        </select>
+        <label for="delivery-assignee">{{ _('负责人') }}</label>
+        <select id="delivery-assignee" name="assignee_number"><option value="">{{ _('未分配') }}</option></select>
+        <label for="delivery-subject">{{ _('内容（subject）') }}</label>
+        <textarea id="delivery-subject" name="subject" required></textarea>
+        <label for="delivery-source">{{ _('来源（source，一句话：从哪来的）') }}</label>
+        <input type="text" id="delivery-source" name="source" autocomplete="off">
+        <div id="delivery-driver-field" class="hidden">
+          <label for="delivery-driver">{{ _('驱动方式（driver，仅用户旅程 / NFR 承诺）') }}</label>
+          <input type="text" id="delivery-driver" name="driver" autocomplete="off">
+        </div>
+        <label for="delivery-status">{{ _('状态（status）') }}</label>
+        <select id="delivery-status" name="status">
+          <option value="open">{{ _('open · 待处理') }}</option>
+          <option value="covered">{{ _('covered · 已覆盖') }}</option>
+          <option value="waived">{{ _('waived · 已豁免') }}</option>
+        </select>
+        <label for="delivery-covered-by">{{ _('covered_by（status=covered 时必填：本项验证内容）') }}</label>
+        <textarea id="delivery-covered-by" name="covered_by"></textarea>
+        <label for="delivery-evidence-command">{{ _('验证命令') }}</label>
+        <textarea id="delivery-evidence-command" name="evidence_command"></textarea>
+        <label for="delivery-evidence-output">{{ _('实际输出') }}</label>
+        <textarea id="delivery-evidence-output" name="evidence_output"></textarea>
+        <label for="delivery-evidence-exit-code">{{ _('退出码') }}</label>
+        <input type="number" id="delivery-evidence-exit-code" name="evidence_exit_code" step="1">
+        <label for="delivery-verified-revision">{{ _('验证的代码版本') }}</label>
+        <input id="delivery-verified-revision" name="verified_revision" autocomplete="off">
+        <label for="delivery-repair-record">{{ _('修复记录（失败、修改、验证）') }}</label>
+        <textarea id="delivery-repair-record" name="repair_record"></textarea>
+        <label for="delivery-blocked-reason">{{ _('资源阻塞原因') }}</label>
+        <textarea id="delivery-blocked-reason" name="blocked_reason"></textarea>
+        <label for="delivery-waive-reason">{{ _('waive_reason（status=waived 时必填：谁决定不做、为什么）') }}</label>
+        <textarea id="delivery-waive-reason" name="waive_reason"></textarea>
+        <label for="delivery-found-in-round">{{ _('found_in_round（第几轮发现的）') }}</label>
+        <input type="number" id="delivery-found-in-round" name="found_in_round" min="1" step="1" value="1">
+        <span id="delivery-modal-error" class="form-error" role="alert"></span>
+        <div class="modal-actions">
+          <button type="button" id="delivery-modal-cancel">{{ _('取消') }}</button>
+          <button type="submit" id="delivery-modal-submit">{{ _('保存') }}</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

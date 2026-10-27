@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ _('项目列表 · Harnoq') }}{% endblock %}
+{% block content %}
+<div id="projects-page" data-view="projects">
+  <h1>{{ _('项目') }}</h1>
+
+  <button id="create-project-btn" class="primary-button" type="button">{{ _('创建项目') }}</button>
+  <noscript><p class="empty">{{ _('创建项目需要启用 JavaScript（也可以直接调用') }} <code>POST /projects</code> API）。</p></noscript>
+
+  <div id="projects-status" class="loading" role="status">{{ _('正在加载项目...') }}</div>
+  <table id="projects-table" class="grid hidden" aria-live="polite">
+    <thead>
+      <tr><th>{{ _('编号') }}</th><th>{{ _('项目') }}</th><th>{{ _('状态') }}</th><th>{{ _('任务') }}</th><th>{{ _('进度') }}</th><th>{{ _('操作') }}</th></tr>
+    </thead>
+    <tbody id="projects-body"></tbody>
+  </table>
+
+  <section id="projects-trash" class="trash-zone hidden"></section>
+</div>
+{% endblock %}

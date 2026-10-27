@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}{{ _('需求汇总 · Harnoq') }}{% endblock %}
+{% block content %}
+<div id="requirement-digest-page" data-project-id="{{ project_id }}">
+  <p class="breadcrumb"><a href="{{ url_for('web.design_cases_list', project_id=project_id) }}">{{ _('← 返回设计用例') }}</a></p>
+  {% include "_project_flow_nav.html" %}
+  <h1>{{ _('需求汇总') }} <span id="rd-count" class="count">0</span></h1>
+  <p class="hint">
+    {{ _('本页由各设计用例的“需求(挖掘所得)”派生,不单独存储。要改需求,去对应的\n    DESIGN-* 里改,这里跟着变。') }}
+  </p>
+  <div id="rd-status" class="loading" role="status">{{ _('正在加载需求汇总...') }}</div>
+  <div id="rd-error" class="error hidden" role="alert"></div>
+  <div id="rd-content" class="hidden" aria-live="polite">
+    <div id="rd-unrecorded" class="rd-unrecorded hidden" role="alert"></div>
+    <div id="rd-summary" class="rd-summary"></div>
+    <div id="rd-features"></div>
+  </div>
+</div>
+{% endblock %}

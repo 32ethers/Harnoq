@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}{{ _('功能 · Harnoq') }}{% endblock %}
+{% block vendor_scripts %}
+  <script src="{{ url_for('static', filename='vendor/mermaid.min.js') }}" defer></script>
+{% endblock %}
+{% block content %}
+<div id="feature-page" data-view="feature-detail" data-feature-id="{{ feature_id }}">
+  <p class="breadcrumb"><a id="fdi-back-link" href="{{ url_for('web.projects_list') }}">{{ _('← 返回功能列表') }}</a></p>
+  {% include "_project_flow_nav.html" %}
+  <div id="fdi-status" class="loading" role="status">{{ _('正在加载功能...') }}</div>
+  <div id="fdi-error" class="error hidden" role="alert"></div>
+
+  <div id="fdi-content" class="hidden" aria-live="polite">
+    <div class="detail-header">
+      <h1>
+        <span id="fdi-title"></span>
+        <span id="fdi-progress-badge"></span>
+      </h1>
+    </div>
+
+    <section class="detail-info">
+      <div class="detail-field">
+        <span class="detail-label">{{ _('编号') }}</span>
+        <span id="fdi-display-number"></span>
+      </div>
+      <div class="detail-field">
+        <span class="detail-label">{{ _('当前版本') }}</span>
+        <span id="fdi-display-version"></span>
+      </div>
+      <div class="detail-field">
+        <span class="detail-label">{{ _('负责人') }}</span>
+        <span id="fdi-display-assignee"></span>
+      </div>
+      <div class="detail-field">
+        <span class="detail-label">{{ _('类型') }}</span>
+        <span id="fdi-display-tags"></span>
+      </div>
+      <div class="detail-field">
+        <span class="detail-label">{{ _('依赖的功能块') }}</span>
+        <span id="fdi-display-dependencies"></span>
+      </div>
+      <div class="detail-field">
+        <span class="detail-label">{{ _('旗下设计用例') }}</span>
+        <span id="fdi-display-designs"></span>
+      </div>
+      <div class="detail-field detail-field-block">
+        <span class="detail-label">{{ _('描述') }}</span>
+        <div id="fdi-display-description" class="markdown-body"></div>
+      </div>
+    </section>
+
+    <section class="detail-info">
+      <h2>{{ _('归属链') }}</h2>
+      <p class="summary">{{ _('这个功能下面的 DESIGN-* → TASK-*。点节点可以跳过去。') }}</p>
+      <div id="fdi-chain-graph" class="feature-graph-wrap"></div>
+    </section>
+
+    <section class="status-transition">
+      <h2>{{ _('操作') }}</h2>
+      <div class="action-area">
+        <div id="fdi-actions" class="actions"></div>
+        <p id="fdi-hint" class="summary"></p>
+      </div>
+    </section>
+
+    <section class="version-history">
+      <h2>{{ _('版本历史') }}</h2>
+      <p class="summary">{{ _('选择两个版本后比较；差异完全在浏览器中生成，不会修改任何版本。') }}</p>
+      <div class="version-compare-actions">
+        <button id="fdi-compare-versions" class="action-button" type="button" disabled>{{ _('比较所选版本') }}</button>
+      </div>
+      <div id="fdi-versions-empty" class="hidden empty">{{ _('暂无历史版本。') }}</div>
+      <div id="fdi-versions-table"></div>
+    </section>
+
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}{{ _('功能 · Harnoq') }}{% endblock %}
+{% block vendor_scripts %}
+  <script src="{{ url_for('static', filename='vendor/mermaid.min.js') }}" defer></script>
+{% endblock %}
+{% block content %}
+<div id="features-list-page" data-project-id="{{ project_id }}">
+  <p class="breadcrumb"><a href="{{ url_for('web.project_detail', project_id=project_id) }}">{{ _('← 返回项目') }}</a></p>
+  {% include "_project_flow_nav.html" %}
+  <h1>{{ _('功能') }} <span id="fl-count" class="count">0</span></h1>
+
+  <button id="fl-create-btn" class="primary-button" type="button">{{ _('添加功能') }}</button>
+  <div id="fl-status" class="loading" role="status">{{ _('正在加载功能...') }}</div>
+  <div id="fl-error" class="error hidden" role="alert"></div>
+
+  <div id="fl-content" class="hidden" aria-live="polite">
+    <div id="fl-table-section"></div>
+    <h2>{{ _('依赖关系图') }}</h2>
+    <div id="fl-graph-section" class="feature-graph-wrap"></div>
+  </div>
+
+  <section id="fl-trash" class="trash-zone hidden"></section>
+
+  <div id="fl-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="fl-modal-title">
+    <div class="modal modal-wide">
+      <h2 id="fl-modal-title"></h2>
+      <form id="fl-modal-form" class="modal-form" novalidate>
+        <label for="fl-name">{{ _('名称') }}</label>
+        <input type="text" id="fl-name" name="name" required autocomplete="off">
+        <label for="fl-description">{{ _('描述') }}</label>
+        <textarea id="fl-description" name="description"></textarea>
+        <label for="fl-assignee">{{ _('负责人') }}</label>
+        <select id="fl-assignee" name="assignee_number"><option value="">{{ _('未分配') }}</option></select>
+        <label for="fl-orientation">{{ _('方向（orientation）') }}</label>
+        <select id="fl-orientation" name="orientation">
+          <option value="vertical">{{ _('vertical · 用户可见的功能切片') }}</option>
+          <option value="foundation">{{ _('foundation · 项目级平台基础') }}</option>
+        </select>
+        <label for="fl-foundation-kind">{{ _('基础设计类型（仅 foundation）') }}</label>
+        <select id="fl-foundation-kind" name="foundation_kind">
+          <option value="">{{ _('普通基础 / 不指定') }}</option>
+          <option value="architecture">architecture · Architecture Foundation</option>
+          <option value="ui">ui · UI Foundation（Design System + App Shell）</option>
+        </select>
+        <label for="fl-subdomain-type">{{ _('子域类型（subdomain_type）') }}</label>
+        <select id="fl-subdomain-type" name="subdomain_type">
+          <option value="supporting">{{ _('supporting · 需要但不差异化') }}</option>
+          <option value="core">{{ _('core · 命脉，最先验证') }}</option>
+          <option value="generic">{{ _('generic · 业界已解决，采买/复用') }}</option>
+        </select>
+        <label class="checkbox-label" for="fl-is-spike">
+          <input type="checkbox" id="fl-is-spike" name="is_spike"> {{ _('is_spike · core 块先做 walking skeleton') }}
+        </label>
+        <label for="fl-depends-on-feature-ids">{{ _('依赖的功能块（depends_on）') }}</label>
+        <select id="fl-depends-on-feature-ids" name="depends_on_feature_ids" multiple></select>
+        <p id="fl-depends-hint" class="summary">{{ _('项目级顺序：Architecture Foundation → UI Foundation → 各 vertical 功能切片；不能成环。') }}</p>
+        <span id="fl-modal-error" class="form-error" role="alert"></span>
+        <div class="modal-actions">
+          <button type="button" id="fl-modal-cancel">{{ _('取消') }}</button>
+          <button type="submit" id="fl-modal-submit">{{ _('保存') }}</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

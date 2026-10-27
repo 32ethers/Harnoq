@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "harnoq": {
+      "type": "http",
+      "url": "http://127.0.0.1:5000/mcp",
+      "headers": {"Authorization": "Bearer ${HARNOQ_API_TOKEN}"}
+    }
+  }
+}

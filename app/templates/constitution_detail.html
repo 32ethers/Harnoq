@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}{{ _('项目规范 · Harnoq') }}{% endblock %}
+{% block content %}
+<div id="constitution-page" data-view="constitution-detail" data-project-id="{{ project_id }}">
+  <p class="breadcrumb"><a id="cst-back-link" href="{{ url_for('web.projects_list') }}">{{ _('← 返回项目') }}</a></p>
+  {% include "_project_flow_nav.html" %}
+  <div id="cst-status" class="loading" role="status">{{ _('正在加载项目规范...') }}</div>
+  <div id="cst-error" class="error hidden" role="alert"></div>
+
+  <div id="cst-content" class="hidden" aria-live="polite">
+    <div class="detail-header">
+      <h1>
+        {{ _('项目规范') }}
+        <span id="cst-status-badge"></span>
+      </h1>
+      <div id="cst-edit-area" class="actions"></div>
+    </div>
+
+    <p class="page-intro">
+      {{ _('项目规范是整个项目的') }}<strong>{{ _('共同约定与全局背景') }}</strong>{{ _('——固定技术栈、质量线、\n      界面规范、非功能基线、边界。它的作用是让设计与开发阶段了解项目全局并遵守这些约定，\n      是') }}<strong>{{ _('持续生效的横切约束，而不是某个设计的组成部分') }}</strong>{{ _('：设计是在它约束下做出的，\n      并不把它抄进自己。因此修订它，是更新对后续所有设计与开发生效的约定，') }}
+      <strong>{{ _('不会把已确认的功能与设计打回重审') }}</strong>{{ _('——遵守新约定发生在开发时。\n      （只有整套技术栈更换、边界重划这类根本性变更才需要人工全面复审，那是罕见事件，不靠自动传播。）') }}
+    </p>
+
+    <div id="cst-empty" class="hidden empty">
+      {{ _('本项目还没有项目规范。它在原始需求确认后、进入功能/设计之前收割生成——汇总固定技术栈、质量线、界面规范、非功能基线与边界。') }}
+    </div>
+
+    <section id="cst-sections" class="detail-info">
+      <div class="detail-field detail-field-block">
+        <span class="detail-label">{{ _('系统性质与目标') }}</span>
+        <div id="cst-display-system-nature" class="markdown-body"></div>
+      </div>
+      <div class="detail-field detail-field-block">
+        <span class="detail-label">{{ _('固定技术栈') }}</span>
+        <div id="cst-display-fixed-stack" class="markdown-body"></div>
+      </div>
+      <div class="detail-field detail-field-block">
+        <span class="detail-label">{{ _('质量线与测试标准') }}</span>
+        <div id="cst-display-quality-bar" class="markdown-body"></div>
+      </div>
+      <div class="detail-field detail-field-block">
+        <span class="detail-label">{{ _('界面与交互规范') }}</span>
+        <div id="cst-display-ui-conventions" class="markdown-body"></div>
+      </div>
+      <div class="detail-field detail-field-block">
+        <span class="detail-label">{{ _('非功能基线') }}</span>
+        <div id="cst-display-nfr-baseline" class="markdown-body"></div>
+      </div>
+      <div class="detail-field detail-field-block">
+        <span class="detail-label">{{ _('边界（总是做 / 先问 / 绝不做）') }}</span>
+        <div id="cst-display-boundaries" class="markdown-body"></div>
+      </div>
+    </section>
+
+    <section class="status-transition">
+      <h2>{{ _('状态操作') }}</h2>
+      <div class="action-area">
+        <div id="cst-lifecycle-actions" class="actions"></div>
+        <p id="cst-lifecycle-hint" class="summary"></p>
+      </div>
+    </section>
+
+    <section class="version-history">
+      <h2>{{ _('版本历史') }}</h2>
+      <p class="summary">{{ _('选择两个版本后比较；差异完全在浏览器中生成，不会修改任何版本。') }}</p>
+      <div class="version-compare-actions">
+        <button id="cst-compare-versions" class="action-button" type="button" disabled>{{ _('比较所选版本') }}</button>
+      </div>
+      <div id="cst-versions-empty" class="hidden empty">{{ _('暂无历史版本。') }}</div>
+      <div id="cst-versions-table"></div>
+    </section>
+
+  </div>
+
+  <div id="cst-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="cst-modal-title">
+    <div class="modal modal-wide">
+      <h2 id="cst-modal-title"></h2>
+      <form id="cst-modal-form" class="modal-form" novalidate>
+        <label for="cst-system-nature">{{ _('系统性质与目标') }}</label>
+        <textarea id="cst-system-nature" name="system_nature"></textarea>
+        <label for="cst-fixed-stack">{{ _('固定技术栈') }}</label>
+        <textarea id="cst-fixed-stack" name="fixed_stack"></textarea>
+        <label for="cst-quality-bar">{{ _('质量线与测试标准') }}</label>
+        <textarea id="cst-quality-bar" name="quality_bar"></textarea>
+        <label for="cst-ui-conventions">{{ _('界面与交互规范') }}</label>
+        <textarea id="cst-ui-conventions" name="ui_conventions"></textarea>
+        <label for="cst-nfr-baseline">{{ _('非功能基线') }}</label>
+        <textarea id="cst-nfr-baseline" name="nfr_baseline"></textarea>
+        <label for="cst-boundaries">{{ _('边界（总是做 / 先问 / 绝不做）') }}</label>
+        <textarea id="cst-boundaries" name="boundaries"></textarea>
+        <span id="cst-modal-error" class="form-error" role="alert"></span>
+        <div class="modal-actions">
+          <button type="button" id="cst-modal-cancel">{{ _('取消') }}</button>
+          <button type="submit" id="cst-modal-submit">{{ _('保存') }}</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

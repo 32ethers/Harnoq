@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}{{ _('原始需求 · Harnoq') }}{% endblock %}
+{% block content %}
+<div id="source-requirement-page" data-view="source-requirement-detail" data-input-id="{{ source_requirement_id }}">
+  <p class="breadcrumb"><a id="ri-back-link" href="{{ url_for('web.projects_list') }}">{{ _('← 返回原始需求列表') }}</a></p>
+  {% include "_project_flow_nav.html" %}
+  <div id="ri-status" class="loading" role="status">{{ _('正在加载原始需求...') }}</div>
+  <div id="ri-error" class="error hidden" role="alert"></div>
+
+  <div id="ri-content" class="hidden" aria-live="polite">
+    <div class="detail-header">
+      <h1>
+        <span id="ri-title"></span>
+        <span id="ri-status-badge"></span>
+      </h1>
+    </div>
+
+    <section class="detail-info">
+      <div class="detail-field">
+        <span class="detail-label">{{ _('标题') }}</span>
+        <span id="ri-display-title"></span>
+      </div>
+      <div class="detail-field">
+        <span class="detail-label">{{ _('类型') }}</span>
+        <span id="ri-display-type"></span>
+      </div>
+      <div class="detail-field">
+        <span class="detail-label">{{ _('负责人') }}</span>
+        <span id="ri-display-assignee"></span>
+      </div>
+      <div class="detail-field">
+        <span class="detail-label">{{ _('来源') }}</span>
+        <span id="ri-display-source"></span>
+      </div>
+      <div class="detail-field">
+        <span class="detail-label">{{ _('当前版本') }}</span>
+        <span id="ri-display-version"></span>
+      </div>
+      <div class="detail-field detail-field-block">
+        <span class="detail-label">{{ _('需求原文') }}</span>
+        <div id="ri-display-content" class="markdown-body"></div>
+      </div>
+    </section>
+
+    <section class="status-transition">
+      <h2>{{ _('操作') }}</h2>
+      <div class="action-area">
+        <div id="ri-lifecycle-actions" class="actions"></div>
+        <p id="ri-lifecycle-hint" class="summary"></p>
+      </div>
+    </section>
+
+    <section class="version-history">
+      <h2>{{ _('版本历史') }}</h2>
+      <p class="summary">{{ _('选择两个版本后比较；差异完全在浏览器中生成，不会修改任何版本。') }}</p>
+      <div class="version-compare-actions">
+        <button id="ri-compare-versions" class="action-button" type="button" disabled>{{ _('比较所选版本') }}</button>
+      </div>
+      <div id="ri-versions-empty" class="hidden empty">{{ _('暂无历史版本。') }}</div>
+      <div id="ri-versions-table"></div>
+    </section>
+
+  </div>
+</div>
+{% endblock %}

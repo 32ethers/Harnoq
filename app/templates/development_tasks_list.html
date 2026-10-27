@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}{{ _('开发任务 · Harnoq') }}{% endblock %}
+{% block content %}
+<div id="development-tasks-list-page" data-project-id="{{ project_id }}">
+  <p class="breadcrumb"><a href="{{ url_for('web.project_detail', project_id=project_id) }}">{{ _('← 返回项目') }}</a></p>
+  {% include "_project_flow_nav.html" %}
+  <h1>{{ _('开发任务') }} <span id="dtl-count" class="count">0</span></h1>
+
+  <p class="empty" style="margin-bottom:1rem;">{{ _('设计任务严格遵循一个 DESIGN 对应一个 TASK；新增能力范围请通过获批 CR 来源任务进入。集成和系统验证直接记录在阶段事项中。') }}</p>
+  <button type="button" id="dtl-create-btn" class="action-button">{{ _('新建任务') }}</button>
+  <div id="dtl-status" class="loading" role="status">{{ _('正在加载开发任务...') }}</div>
+  <div id="dtl-error" class="error hidden" role="alert"></div>
+
+  <div id="dtl-content" class="hidden" aria-live="polite">
+    <div id="dtl-table-section"></div>
+  </div>
+
+  <section id="dtl-trash" class="trash-zone hidden"></section>
+
+  <div id="dtl-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="dtl-modal-title">
+    <div class="modal">
+      <h2 id="dtl-modal-title"></h2>
+      <form id="dtl-modal-form" class="modal-form" novalidate>
+        <label for="dtl-title">{{ _('标题') }}</label>
+        <input type="text" id="dtl-title" name="title" required autocomplete="off">
+        <label for="dtl-description">{{ _('描述') }}</label>
+        <textarea id="dtl-description" name="description"></textarea>
+        <label for="dtl-acceptance">{{ _('验收标准') }}</label>
+        <textarea id="dtl-acceptance" name="acceptance_criteria"></textarea>
+        <label for="dtl-constraints">{{ _('约束') }}</label>
+        <textarea id="dtl-constraints" name="constraints"></textarea>
+        <label for="dtl-non-goals">{{ _('非目标') }}</label>
+        <textarea id="dtl-non-goals" name="non_goals"></textarea>
+        <label for="dtl-task-type">{{ _('类型') }}</label>
+        <select id="dtl-task-type" name="task_type">
+          <option value="feature">{{ _('功能') }}</option>
+          <option value="bug_fix">{{ _('缺陷修复') }}</option>
+          <option value="refactor">{{ _('重构') }}</option>
+          <option value="test">{{ _('测试') }}</option>
+          <option value="mock_env">{{ _('模拟环境') }}</option>
+          <option value="mock_data">{{ _('模拟数据') }}</option>
+          <option value="doc">{{ _('文档') }}</option>
+          <option value="infrastructure">{{ _('基础设施') }}</option>
+        </select>
+        <label for="dtl-priority">{{ _('优先级') }}</label>
+        <select id="dtl-priority" name="priority">
+          <option value="low">{{ _('低') }}</option>
+          <option value="normal" selected>{{ _('普通') }}</option>
+          <option value="high">{{ _('高') }}</option>
+          <option value="urgent">{{ _('紧急') }}</option>
+        </select>
+        <label for="dtl-complexity">{{ _('复杂度') }}</label>
+        <select id="dtl-complexity" name="complexity">
+          <option value="small">{{ _('小') }}</option>
+          <option value="medium" selected>{{ _('中') }}</option>
+          <option value="large">{{ _('大') }}</option>
+          <option value="xlarge">{{ _('超大') }}</option>
+        </select>
+        <label for="dtl-risk-level">{{ _('风险等级') }}</label>
+        <select id="dtl-risk-level" name="risk_level">
+          <option value="low" selected>{{ _('低') }}</option>
+          <option value="medium">{{ _('中') }}</option>
+          <option value="high">{{ _('高') }}</option>
+        </select>
+        <span id="dtl-modal-error" class="form-error" role="alert"></span>
+        <div class="modal-actions">
+          <button type="button" id="dtl-modal-cancel">{{ _('取消') }}</button>
+          <button type="submit" id="dtl-modal-submit">{{ _('保存') }}</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="dtl-create-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="dtlc-modal-title">
+    <div class="modal">
+      <h2 id="dtlc-modal-title"></h2>
+      <form id="dtlc-modal-form" class="modal-form" novalidate>
+        <label for="dtlc-design">{{ _('设计用例（仅已确认）') }}</label>
+        <select id="dtlc-design" name="design_id" required></select>
+        <label for="dtlc-title">{{ _('标题') }}</label>
+        <input type="text" id="dtlc-title" name="title" required autocomplete="off">
+        <label for="dtlc-task-type">{{ _('类型') }}</label>
+        <select id="dtlc-task-type" name="task_type">
+          <option value="feature">{{ _('功能') }}</option>
+          <option value="bug_fix">{{ _('缺陷修复') }}</option>
+          <option value="refactor">{{ _('重构') }}</option>
+          <option value="test">{{ _('测试') }}</option>
+          <option value="mock_env">{{ _('模拟环境') }}</option>
+          <option value="mock_data">{{ _('模拟数据') }}</option>
+          <option value="doc">{{ _('文档') }}</option>
+          <option value="infrastructure">{{ _('基础设施') }}</option>
+        </select>
+        <label for="dtlc-goal">{{ _('目标') }}</label>
+        <textarea id="dtlc-goal" name="goal"></textarea>
+        <label for="dtlc-acceptance">{{ _('验收标准') }}</label>
+        <textarea id="dtlc-acceptance" name="acceptance_criteria"></textarea>
+        <label for="dtlc-constraints">{{ _('约束') }}</label>
+        <textarea id="dtlc-constraints" name="constraints"></textarea>
+        <label for="dtlc-non-goals">{{ _('非目标') }}</label>
+        <textarea id="dtlc-non-goals" name="non_goals"></textarea>
+        <label for="dtlc-priority">{{ _('优先级') }}</label>
+        <select id="dtlc-priority" name="priority">
+          <option value="low">{{ _('低') }}</option>
+          <option value="normal" selected>{{ _('普通') }}</option>
+          <option value="high">{{ _('高') }}</option>
+          <option value="urgent">{{ _('紧急') }}</option>
+        </select>
+        <label for="dtlc-complexity">{{ _('复杂度') }}</label>
+        <select id="dtlc-complexity" name="complexity">
+          <option value="small">{{ _('小') }}</option>
+          <option value="medium" selected>{{ _('中') }}</option>
+          <option value="large">{{ _('大') }}</option>
+          <option value="xlarge">{{ _('超大') }}</option>
+        </select>
+        <label for="dtlc-risk-level">{{ _('风险等级') }}</label>
+        <select id="dtlc-risk-level" name="risk_level">
+          <option value="low" selected>{{ _('低') }}</option>
+          <option value="medium">{{ _('中') }}</option>
+          <option value="high">{{ _('高') }}</option>
+        </select>
+        <span id="dtlc-modal-error" class="form-error" role="alert"></span>
+        <div class="modal-actions">
+          <button type="button" id="dtlc-modal-cancel">{{ _('取消') }}</button>
+          <button type="submit" id="dtlc-modal-submit">{{ _('创建') }}</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,32 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+# Anchored: a bare "build/" matches a directory of that name at ANY depth, and
+# it silently swallowed evals/build/ — the files existed, tests passed, and git
+# simply never saw them. Only the setuptools output at the repo root is meant.
+/build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.idea
+
+# Local SQLite databases. WAL mode puts the live log and shared-memory index
+# next to the database file, so they appear whenever the app has run.
+*.db
+*.db-wal
+*.db-shm
+
+# Root MCP config is a per-user client opt-in, not a repo default.
+# Copy harnoq_mcp/mcp.json here if you want to consume Harnoq from this folder.
+/.mcp.json
+/instance/
+# local db backups (SessionStart hook)
+backups/
+
+# Manual pre-ALTER snapshots of the dev database (no migration runner; see
+# app/db/schema.py). They are local safety copies, never repository content —
+# one got committed once already.
+harnoq.db.bak-*

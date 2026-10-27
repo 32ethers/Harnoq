@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}{{ _('开发任务 · Harnoq') }}{% endblock %}
+{% block content %}
+<div id="development-task-page" data-view="development-task-detail" data-task-id="{{ task_id }}">
+  <p class="breadcrumb"><a id="dti-back-link" href="{{ url_for('web.projects_list') }}">{{ _('← 返回开发任务列表') }}</a></p>
+  {% include "_project_flow_nav.html" %}
+  <div id="dti-status" class="loading" role="status">{{ _('正在加载开发任务...') }}</div>
+  <div id="dti-error" class="error hidden" role="alert"></div>
+
+  <div id="dti-content" class="hidden" aria-live="polite">
+    <div class="detail-header">
+      <h1>
+        <span id="dti-title"></span>
+        <span id="dti-status-badge"></span>
+      </h1>
+    </div>
+
+    <div id="dti-status-progress" class="status-progress"></div>
+
+    <section class="detail-info">
+      <div class="detail-field">
+        <span class="detail-label">{{ _('编号') }}</span>
+        <span id="dti-display-number"></span>
+      </div>
+      <div class="detail-field">
+        <span class="detail-label">{{ _('标题') }}</span>
+        <span id="dti-display-title"></span>
+      </div>
+      <div class="detail-field">
+        <span class="detail-label">{{ _('类型') }}</span>
+        <span id="dti-display-type"></span>
+      </div>
+      <div class="detail-field">
+        <span class="detail-label">{{ _('优先级') }}</span>
+        <span id="dti-display-priority"></span>
+      </div>
+      <div class="detail-field">
+        <span class="detail-label">{{ _('复杂度') }}</span>
+        <span id="dti-display-complexity"></span>
+      </div>
+      <div class="detail-field">
+        <span class="detail-label">{{ _('风险') }}</span>
+        <span id="dti-display-risk"></span>
+      </div>
+      <div class="detail-field">
+        <span class="detail-label">{{ _('负责人') }}</span>
+        <span id="dti-display-assignee"></span>
+      </div>
+      <div class="detail-field">
+        <span class="detail-label">{{ _('所属设计') }}</span>
+        <span id="dti-display-requirement"></span>
+      </div>
+      <div class="detail-field">
+        <span class="detail-label">{{ _('来源类型') }}</span>
+        <span id="dti-display-source-kind"></span>
+      </div>
+      <div class="detail-field detail-field-block">
+        <span class="detail-label">{{ _('直接来源与任务依赖') }}</span>
+        <div id="dti-display-sources"></div>
+      </div>
+      <div class="detail-field detail-field-block">
+        <span class="detail-label">{{ _('描述') }}</span>
+        <div id="dti-display-description" class="markdown-body"></div>
+      </div>
+      <div class="detail-field detail-field-block">
+        <span class="detail-label">{{ _('验收标准') }}</span>
+        <div id="dti-display-acceptance" class="markdown-body"></div>
+      </div>
+      <div class="detail-field detail-field-block">
+        <span class="detail-label">{{ _('约束') }}</span>
+        <div id="dti-display-constraints" class="markdown-body"></div>
+      </div>
+      <div class="detail-field detail-field-block">
+        <span class="detail-label">{{ _('非目标') }}</span>
+        <div id="dti-display-non-goals" class="markdown-body"></div>
+      </div>
+    </section>
+
+    <section class="status-transition">
+      <h2>{{ _('状态操作') }}</h2>
+      <div class="action-area">
+        <div id="dti-lifecycle-actions" class="actions"></div>
+        <p id="dti-lifecycle-hint" class="summary"></p>
+      </div>
+    </section>
+
+    <section class="version-history">
+      <h2>{{ _('依赖(Feature)') }}</h2>
+      <p class="summary">
+        {{ _('依赖只挂在 Feature 层，实时计算，不存储、不在任务间连边。') }}
+      </p>
+      <div id="dti-feature-gate" class="summary"></div>
+    </section>
+
+    <section class="version-history">
+      <h2>{{ _('流转记录') }}</h2>
+      <p class="summary">
+        {{ _('状态流转、agent 运行与 PR 的合并时间轴。状态流转自本功能上线后开始记录，\n        更早的任务只显示当时已存下的 agent 运行与 PR。') }}
+      </p>
+      <div id="dti-timeline"></div>
+    </section>
+
+    <section class="version-history">
+      <h2>{{ _('相关变更单') }}</h2>
+      <p class="summary">
+        {{ _('改写过这个任务的已交付代码、或改写过它所依据设计的变更单。看的是') }}<strong>{{ _('为什么') }}</strong>{{ _('——\n        变更单从不携带新内容，实施之后本页上面写的就是最终结果，不要拿它跟这个列表对账。') }}
+      </p>
+      <div id="dti-change-requests-empty" class="hidden empty">{{ _('没有变更单改写过它。') }}</div>
+      <div id="dti-change-requests"></div>
+    </section>
+  </div>
+</div>
+{% endblock %}

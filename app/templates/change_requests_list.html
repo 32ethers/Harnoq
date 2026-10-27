@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}{{ _('变更请求 · Harnoq') }}{% endblock %}
+{% block vendor_scripts %}
+  <script src="{{ url_for('static', filename='vendor/mermaid.min.js') }}" defer></script>
+{% endblock %}
+{% block content %}
+<div id="change-requests-list-page" data-project-id="{{ project_id }}" data-project-number="{{ project_number }}">
+  <p class="breadcrumb"><a href="{{ url_for('web.project_detail', project_id=project_id) }}">{{ _('← 返回项目') }}</a></p>
+  {% include "_project_flow_nav.html" %}
+  <h1>{{ _('变更请求') }} <span id="crl-count" class="count">0</span></h1>
+  <p class="summary">{{ _('改草稿不需要变更请求，直接改就行。这里记的是“已经有东西建在上面”的改动：先看清影响，再决定改不改。') }}</p>
+
+  <div class="actions">
+    <button id="crl-create-btn" class="primary-button" type="button">{{ _('提出变更') }}</button>
+    <button id="crl-create-task-btn" class="action-button" type="button">{{ _('从所选已批准变更创建任务') }}</button>
+  </div>
+  <div id="crl-status" class="loading" role="status">{{ _('正在加载变更请求...') }}</div>
+  <div id="crl-error" class="error hidden" role="alert"></div>
+
+  <div id="crl-content" class="hidden" aria-live="polite">
+    <div id="crl-table-section"></div>
+  </div>
+
+  <section id="crl-trash" class="trash-zone hidden"></section>
+
+  <div id="crl-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="crl-modal-title">
+    <div class="modal modal-wide">
+      <h2 id="crl-modal-title"></h2>
+      <form id="crl-modal-form" class="modal-form" novalidate>
+        <label for="crl-target">{{ _('要改什么') }}</label>
+        <select id="crl-target" name="target">
+          <option value="new">{{ _('新增需求（不动已交付的东西）') }}</option>
+        </select>
+        <p class="field-hint">{{ _('已经交付的任务，默认答案是“新增”而不是推翻重做：提一条新需求、补设计、开新任务，老交付不动。') }}</p>
+
+        <label for="crl-reason">{{ _('原因') }}</label>
+        <textarea id="crl-reason" name="reason" required placeholder="{{ _('为什么要改：什么变了 / 原来的判断哪里不成立') }}"></textarea>
+
+        <div id="crl-impact-panel" class="version-history hidden">
+          <h3>{{ _('会影响到') }}</h3>
+          <div id="crl-impact-empty" class="hidden empty">{{ _('下游没有东西建在它上面，这次改动是自由的。') }}</div>
+          <div id="crl-impact-graph" class="feature-graph-wrap"></div>
+          <div id="crl-impact-table"></div>
+        </div>
+
+        <span id="crl-modal-error" class="form-error" role="alert"></span>
+        <div class="modal-actions">
+          <button type="button" id="crl-modal-cancel">{{ _('取消') }}</button>
+          <button type="submit" id="crl-modal-submit">{{ _('保存') }}</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="crl-task-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="crl-task-modal-title">
+    <div class="modal modal-wide">
+      <h2 id="crl-task-modal-title">{{ _('从所选变更创建来源任务') }}</h2>
+      <form id="crl-task-form" class="modal-form" novalidate>
+        <label for="crl-task-feature">{{ _('所属 Feature') }}</label><select id="crl-task-feature" name="feature_number" required></select>
+        <label for="crl-task-title">{{ _('标题') }}</label><input id="crl-task-title" name="title" required autocomplete="off">
+        <label for="crl-task-type">{{ _('任务类型') }}</label><select id="crl-task-type" name="task_type"><option value="bug_fix">{{ _('缺陷修复') }}</option><option value="feature">{{ _('功能') }}</option><option value="refactor">{{ _('重构') }}</option><option value="test">{{ _('测试') }}</option></select>
+        <label for="crl-task-goal">{{ _('目标') }}</label><textarea id="crl-task-goal" name="goal" required></textarea>
+        <label for="crl-task-acceptance">{{ _('验收标准') }}</label><textarea id="crl-task-acceptance" name="acceptance_criteria" required></textarea>
+        <label for="crl-task-constraints">{{ _('约束') }}</label><textarea id="crl-task-constraints" name="constraints"></textarea>
+        <label for="crl-task-non-goals">{{ _('非目标') }}</label><textarea id="crl-task-non-goals" name="non_goals"></textarea>
+        <label for="crl-task-priority">{{ _('优先级') }}</label><select id="crl-task-priority" name="priority"><option value="low">{{ _('低') }}</option><option value="normal" selected>{{ _('普通') }}</option><option value="high">{{ _('高') }}</option><option value="urgent">{{ _('紧急') }}</option></select>
+        <label for="crl-task-complexity">{{ _('复杂度') }}</label><select id="crl-task-complexity" name="complexity"><option value="small">{{ _('小') }}</option><option value="medium" selected>{{ _('中') }}</option><option value="large">{{ _('大') }}</option><option value="xlarge">{{ _('超大') }}</option></select>
+        <label for="crl-task-risk">{{ _('风险') }}</label><select id="crl-task-risk" name="risk_level"><option value="low" selected>{{ _('低') }}</option><option value="medium">{{ _('中') }}</option><option value="high">{{ _('高') }}</option></select>
+        <span id="crl-task-error" class="form-error" role="alert"></span>
+        <div class="modal-actions"><button type="button" id="crl-task-cancel">{{ _('取消') }}</button><button type="submit" class="primary-button">{{ _('创建') }}</button></div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

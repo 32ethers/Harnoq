@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}{{ _('我的账号 · Harnoq') }}{% endblock %}
+{% block content %}
+<div id="account-page">
+  <h1>{{ _('我的账号') }}</h1><p id="account-error" class="form-error" role="alert"></p>
+  <div class="detail-header"><h2>{{ _('MCP / API 凭证') }}</h2><button id="token-add" class="action-button">{{ _('添加凭证') }}</button></div>
+  <p class="summary">{{ _('客户端使用 Authorization: Bearer 凭证。每个凭证归属当前账号；创建后只显示一次，可单独撤销。不要放入代码仓库。') }}</p>
+  <div id="token-list"></div>
+  <section class="action-area"><div class="section-header"><h2>{{ _('修改密码') }}</h2></div>
+    <form id="password-form" class="modal-form account-password-form">
+      <label for="account-current-password">{{ _('当前密码') }}</label>
+      <input id="account-current-password" name="current_password" type="password" autocomplete="current-password" required>
+      <label for="account-new-password">{{ _('新密码') }}</label>
+      <input id="account-new-password" name="password" type="password" autocomplete="new-password" maxlength="256" required>
+      <div class="modal-actions"><button type="submit">{{ _('保存并重新登录') }}</button></div>
+    </form>
+  </section>
+</div>
+<div id="token-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="token-modal-title">
+  <div class="modal"><h2 id="token-modal-title">{{ _('添加凭证') }}</h2>
+    <form id="token-form" class="modal-form">
+      <label for="token-name">{{ _('名称') }}</label>
+      <input id="token-name" type="text" name="name" required maxlength="128">
+      <label for="token-days">{{ _('有效天数') }}</label>
+      <input id="token-days" name="days" type="number" min="1" step="1" value="30" required>
+      <span id="token-form-error" class="form-error" role="alert"></span>
+      <div class="modal-actions"><button type="button" id="token-cancel">{{ _('关闭') }}</button><button type="submit">{{ _('创建') }}</button></div>
+    </form>
+    <div id="token-result" class="modal-form hidden"><p class="summary">{{ _('保存下面的凭证，关闭后不会再次显示。') }}</p><label for="token-value">{{ _('JWT 凭证') }}</label><textarea id="token-value" readonly></textarea><div class="modal-actions"><button type="button" id="token-done">{{ _('关闭') }}</button></div></div>
+  </div>
+</div>
+{% endblock %}

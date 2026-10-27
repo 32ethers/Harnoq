@@ -1,0 +1,3592 @@
+openapi: 3.0.3
+info:
+  title: Harnoq Skills API
+  description: >
+    Skill adapter endpoints for the Harnoq quality-flow system. These are the
+    only endpoints a chat platform (e.g. OpenWebUI) should call when an AI is
+    talking to a human about requirements, decomposition, design, and
+    design-keyed task creation. They are distinct from Harnoq's regular page API.
+    Every response carries a fixed 6-key envelope: object_type, object_id,
+    status, change_summary, open_questions, next_step, plus the resource
+    payload for that action.
+
+    Business object map:
+    - Source Requirement / SourceRequirement: the SOLE requirement layer — raw
+      user material mined by conversation (free text), business id prefix INPUT-.
+      Prefer source_requirement_number. Never send source_requirement_id. There
+      is no separate normalized requirement layer. Every live INPUT-* must be
+      confirmed before Project Constitution consolidation can begin.
+    - Feature: planning and dependency unit between INPUT-* and DESIGN-*;
+      user-visible capabilities use `orientation=vertical`, while project-level
+      foundations use `orientation=foundation`; business id prefix FEATURE-.
+    - DesignCase: a module-level solution/design record for a Feature, business
+      id prefix DESIGN-.
+    - DevelopmentTask: the capability execution unit. A design-backed TASK-* is
+      created under one confirmed DesignCase; approved CR sources may be grouped
+      into one source-backed TASK-*. Integration/System use direct stage items.
+      Task-create writes are keyed by business numbers.
+
+    Workflow order:
+    1. User material is stored as a Source Requirement / SourceRequirement (INPUT-*).
+    2. The INPUT-* is mined by conversation (edit/append raw_content) until the
+       requirement is deeply understood; the deepened understanding is written
+       back into the INPUT-*.
+    3. Confirmed INPUT-* inform a Feature map; the project constitution is
+       consolidated and confirmed before design starts.
+    4. Architecture Foundation, then UI Foundation when applicable, are
+       designed before Feature modules.
+    5. A Feature gets one or more DesignCase records.
+    6. A confirmed DesignCase gets exactly one design-backed TASK-* directly —
+       no intermediate object or generation step. New scope goes through one
+       or more approved CR sources grouped into source-backed TASK-*;
+       a task stays editable while unclaimed ('claimable'), then its content
+       fields lock when claimed.
+
+    AI operating notes:
+    - Always read project context first when you need to know what objects
+      already exist or which business numbers should be referenced.
+    - For user-requested data changes, use the explicit write tool for the
+      relevant object. Treat the returned envelope status as the source of
+      truth for whether the write succeeded.
+    - When the user asks to modify an existing object, use the explicit update
+      tool for that object type. Do not call a create tool unless the user is
+      clearly asking to add a new object.
+    - When the user asks to append text to an existing INPUT-* document, call
+      harnoq_source_requirement_append_content.
+    - Coding and QA subagents have read-only access to project context, task
+      progress, task details, source requirements, features, constitution, and
+      design cases. Reading a TASK-* returns the linked DESIGN-* body joined
+      in under `design`, so no second fetch is needed; that design is the
+      binding spec, not the task's own pointer fields. Manager alone performs
+      task write-back.
+    - Requirement mining deepens the INPUT-* by conversation; write the
+      deepened understanding back via harnoq_source_requirement_update /
+      append_content (or harnoq_source_requirement_create for a distinct newly-
+      surfaced requirement). Reflect the understanding back to the user and
+      let them confirm before rewriting their raw material.
+    - delete/restore tools are exposed for DesignCase.
+      Deletion is soft/recoverable, but you must still get explicit user
+      confirmation before calling a delete tool.
+  version: "1.0.0"
+servers:
+  - url: http://127.0.0.1:5000
+    description: Placeholder only. When served by Harnoq's /openapi.json or /openapi.yaml route, this value is rewritten to the current request host.
+security:
+  - bearerAuth: []
+paths:
+  /skills/project-context:
+    post:
+      operationId: harnoq_project_context
+      summary: Get full project context (read-only)
+      description: >
+        Fetches the project plus all of its source requirements
+        Use this first when you need to know what objects already exist, what
+        their business numbers are, and which object type (INPUT-/DESIGN-
+        /TASK-) the user is referring to. The response includes
+        ai_available_actions on writable objects; use those tool names when the
+        user asks to edit the object.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReadRequest'
+            example:
+              project_number: P1
+              actor: openwebui-user
+              session_id: chat-session-1
+      responses:
+        '200':
+          description: Project context envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/task-progress:
+    post:
+      operationId: harnoq_task_progress
+      summary: Get task progress and quality-gate summary (read-only)
+      description: >
+        Fetches all development tasks for a project (each carrying
+        claim_ready / waiting_on_feature_numbers — whether its upstream
+        Feature dependencies are satisfied) and an aggregated quality-gate
+        summary (review/test/CI pass counts). Use this for execution status,
+        not for requirement decomposition.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReadRequest'
+            example:
+              project_number: P1
+              actor: openwebui-user
+              session_id: chat-session-1
+      responses:
+        '200':
+          description: Task progress envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /projects/{project_number}/tasks/{task_number}:
+    get:
+      operationId: harnoq_task_get
+      summary: Get a development task by business number (read-only)
+      description: >
+        Returns live TASK-* details including acceptance_criteria, constraints,
+        non_goals, design_number, and a `design` object carrying the linked
+        DESIGN-*'s full text (mined_requirements, verifies_nfr, design_scope,
+        selected_solution, constraints,
+        non_goals, acceptance_criteria, test_strategy, risks). For
+        source_kind=design, the strict one-to-one task uses that design as its
+        binding specification. For source-backed tasks there is no DESIGN
+        binding: use the task contract plus change_requests. Also returns
+        `feature` (business number and foundation_kind). Delivery items are
+        owned by project-wide stage runs. `pull_requests`
+        lists every PR the task has had, oldest first. A reopened task keeps
+        its earlier attempts, so more than one
+        entry — or an already-merged one — means this is a retry rather than a
+        first delivery. Also returns `cleared_failures`: for every criterion
+        qa once judged broken, how it stopped being broken — listed only when
+        the answer is one of the two that leave the project no better off.
+        `how="no_new_test"` means it was judged fail/deviates on a green suite
+        (so no test covered it) and passed later without the collected count
+        going up (so none was added). `how="criterion_removed"` means it is not
+        in the design any more — deleting a standard clears a failure just as
+        thoroughly as meeting it. Empty means every earlier failure was
+        answered. It blocks nothing; weigh it when judging a delivery and name
+        those criteria when reporting. Also returns `uncovered_criteria`: from
+        the task's most recent qa verdict, the criteria whose evidence used
+        the structured `{tests, code, note}` shape with an empty `tests`
+        list — qa itself reporting that no automated test watches that
+        criterion. A criterion whose evidence is a plain string is left out of
+        this list rather than counted as uncovered, since prose cannot be
+        parsed back into a tests/code answer. Also returns `prior_evidence`:
+        for each criterion of this design an earlier round already located in
+        the structured shape, the `tests` and `code` positions it found and
+        which task found them — spanning every task against this design, so a
+        re-verifying qa run can skip the hunt. It carries no earlier verdict
+        and no prose note by design: relocation is its purpose, and "it passed
+        last time" is the most anchoring thing that could be handed to a fresh
+        verdict. No second fetch is needed. This endpoint never exposes
+        internal database ids.
+      parameters:
+        - name: project_number
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Project business number, e.g. P1.
+        - name: task_number
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Task business number, e.g. P1-TASK-7.
+      responses:
+        '200':
+          description: Development task details
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /projects/{project_number}/tasks/{task_number}/update:
+    post:
+      operationId: harnoq_task_update
+      summary: Edit an existing task contract by business number (manager-only)
+      description: >
+        Allowed while claimable, or for a source-backed task in needs_revision.
+        Omit unchanged fields and provide at least one field. Does not change task
+        status, source associations, ownership, dependencies or execution evidence.
+        Read the task and current sources, update only authorized contract changes,
+        retaining unwaived obligations, then read back and reopen the SAME task.
+        A rejected design-backed task requires its DESIGN to be revised and
+        reconfirmed instead. Claimed/in-progress/completed tasks cannot be edited
+        in place. This does not waive requirements or replace QA.
+      parameters:
+        - name: project_number
+          in: path
+          required: true
+          schema: {type: string}
+        - name: task_number
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskUpdateRequest'
+      responses:
+        '200':
+          description: Updated task with unchanged lifecycle state and no database ids
+          content:
+            application/json:
+              schema: {type: object}
+
+  /projects/{project_number}/tasks/{task_number}/reopen:
+    post:
+      operationId: harnoq_task_reopen
+      summary: Reopen a needs_revision task after its binding contract is corrected (manager-only write)
+      description: >
+        Moves a needs_revision task back to claimable so it can be claimed again.
+        A design-backed task requires its linked DESIGN-* to be re-confirmed.
+        For a source-backed task, use harnoq_task_update to correct its contract
+        against current sources and read it back before reopening the same task;
+        no DESIGN confirmation is required.
+      parameters:
+        - $ref: '#/components/parameters/ProjectNumber'
+        - $ref: '#/components/parameters/TaskNumber'
+      responses:
+        '200':
+          description: Claimable task details
+
+  /projects/{project_number}/tasks/{task_number}/reopen-completed:
+    post:
+      operationId: harnoq_task_reopen_completed
+      summary: Send a completed task back for rework (manager-only write)
+      description: >
+        Moves a completed task back to claimable for a fresh claim and
+        pre-review. For work outside the task's own cycle — integration
+        testing is the usual case — that shows the merged task failed its
+        binding contract. A design-backed TASK cites the missed DESIGN
+        criterion; a source-backed TASK cites its TASK acceptance criterion or
+        direct source obligation. Requires a non-empty `reason`, which is
+        stored as the task's blocking_issues for the next attempt. The merged
+        PullRequestRecord is kept and the retry gets a new one, so the earlier
+        merge stays on record. The task's Feature stops counting as satisfied,
+        re-blocking downstream tasks that have not been claimed yet;
+        downstream work already underway is not retracted. It is not the path
+        for a contract that needs revision while work is open: use the
+        appropriate reject action to reach `needs_revision`, then reopen;
+        design-backed work requires DESIGN reconfirmation, while source-backed
+        work revises the TASK contract and source obligations.
+      parameters:
+        - $ref: '#/components/parameters/ProjectNumber'
+        - $ref: '#/components/parameters/TaskNumber'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  description: >
+                    Why the completion is being retracted, citing the missed
+                    DESIGN acceptance clause for a design-backed TASK, or the
+                    missed TASK acceptance/source obligation for a
+                    source-backed TASK. New scope belongs in an approved
+                    CR source-backed TASK rather than a second TASK
+                    under one DESIGN.
+      responses:
+        '200':
+          description: Claimable task details
+
+  /projects/{project_number}/tasks/{task_number}/release:
+    post:
+      operationId: harnoq_task_release
+      summary: Drop the claim and return the task to the pool (manager-only write)
+      description: >
+        Returns a claimed task to claimable and clears its assignee, so anyone
+        can pick it up. Use it when the task should be handed back before
+        coding starts — the wrong person holds it, or it was claimed by
+        mistake. Allowed from claimed, pre_reviewing and
+        ready_for_development; from the last of those it DISCARDS the
+        pre-review approval, so the next holder must pre-review again. This is
+        NOT the way to drop a task the review found wrong — that is
+        reject-pre-review, which records why. Refused once coding has started:
+        there is work to hand over by then, and calling the task unclaimed
+        while a branch is open is false.
+      parameters:
+        - $ref: '#/components/parameters/ProjectNumber'
+        - $ref: '#/components/parameters/TaskNumber'
+      responses:
+        '200':
+          description: Claimable task details
+
+  /projects/{project_number}/tasks/{task_number}/start-pre-review:
+    post:
+      operationId: harnoq_task_start_pre_review
+      summary: Start conversational pre-review (manager-only write)
+      description: >
+        OPTIONAL marker: moves a claimed task to pre_reviewing so anyone
+        reading the task list can see a review is under way. Approve and
+        reject are accepted straight from claimed, so this is never a
+        prerequisite. Manager uses this before
+        reconciling the design against the repository as it now exists —
+        checking each assumption and upstream dependency the design states
+        against the actual code, and reporting divergences for the human to
+        decide on. It is a reality check and the last cheap gate before an
+        agent run, not a second design review and not a summary of the
+        design. Coding/QA subagents must never call this action.
+      parameters:
+        - $ref: '#/components/parameters/ProjectNumber'
+        - $ref: '#/components/parameters/TaskNumber'
+      responses:
+        '200':
+          description: Pre-reviewing task details
+
+  /projects/{project_number}/tasks/{task_number}/approve-pre-review:
+    post:
+      operationId: harnoq_task_approve_pre_review
+      summary: Approve a task after its applicable pre-review (manager-only write)
+      description: >
+        Moves a claimed or pre_reviewing task to ready_for_development.
+        For a design-backed task, call only after the human has explicitly
+        approved it in conversation. For a source-backed task created by
+        Integration/System or an approved CR, the manager may approve after
+        checking the TASK contract and direct sources; do not request a second
+        technical approval from the user.
+      parameters:
+        - $ref: '#/components/parameters/ProjectNumber'
+        - $ref: '#/components/parameters/TaskNumber'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reviewer:
+                  type: string
+                  description: Legacy compatibility only. Omit; the server records the authenticated JWT user.
+      responses:
+        '200':
+          description: Ready-for-development task details
+
+  /projects/{project_number}/tasks/{task_number}/reject-pre-review:
+    post:
+      operationId: harnoq_task_reject_pre_review
+      summary: Reject a task during conversational pre-review (manager-only write)
+      description: >
+        Sends a claimed or pre_reviewing task to needs_revision after the
+        applicable review finds a defect. For a design-backed task, the linked
+        DESIGN is revised and re-confirmed; for a source-backed task, revise the
+        TASK contract or direct source obligation. A non-empty comment is
+        mandatory; then reopen the same task.
+      parameters:
+        - $ref: '#/components/parameters/ProjectNumber'
+        - $ref: '#/components/parameters/TaskNumber'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [comment]
+              properties:
+                reviewer:
+                  type: string
+                  description: Legacy compatibility only. Omit; the server records the authenticated JWT user.
+                comment:
+                  type: string
+                  minLength: 1
+                  description: Reason for rejection. Markdown — use real line breaks, never the literal characters backslash-n.
+      responses:
+        '200':
+          description: Rejected task details
+
+  /projects/{project_number}/tasks/{task_number}/start-coding:
+    post:
+      operationId: harnoq_task_start_coding
+      summary: Move an approved task into coding (manager-only write)
+      description: >
+        Moves a ready_for_development task to coding. Manager calls this right
+        before dispatching coder, because a coder agent-run can only be
+        recorded while the task is coding; coding/QA subagents must never call
+        this action.
+      parameters:
+        - $ref: '#/components/parameters/ProjectNumber'
+        - $ref: '#/components/parameters/TaskNumber'
+      responses:
+        '200':
+          description: Coding task details
+
+  /projects/{project_number}/tasks/{task_number}/reject-to-design:
+    post:
+      operationId: harnoq_task_reject_to_design
+      summary: Reject an in-progress task back to its design (manager-only write)
+      description: >
+        Moves an in_progress task to rejected_to_design, for a design defect
+        found once coding is already under way — pre_reviewing is no longer
+        reachable by then. Refused from ready_for_pr; from there the path is
+        withdraw-from-pr first, then this. A non-empty reason is mandatory
+        and must name what in the design is wrong or missing — the
+        reopen-completed citation test pointed the other way: if you cannot
+        name it, this is not a design problem. The way home is to fix that
+        design, re-confirm it, then reopen the task.
+      parameters:
+        - $ref: '#/components/parameters/ProjectNumber'
+        - $ref: '#/components/parameters/TaskNumber'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  description: What in the design is wrong or missing. Plain text.
+      responses:
+        '200':
+          description: Rejected task details
+
+  /projects/{project_number}/tasks/{task_number}/mark-ready-for-pr:
+    post:
+      operationId: harnoq_task_mark_ready_for_pr
+      summary: Pass the quality gate into ready_for_pr (manager-only write)
+      description: >
+        Moves an in_progress task to ready_for_pr. A passing qa run does NOT
+        advance the task on its own — the manager calls this explicitly, and
+        the server re-checks the gate (latest coder and qa runs both passed,
+        the qa run newer than the coder run, blocking_issues empty) and returns 409 if it is not met. Required
+        before link_pr, which only accepts a ready_for_pr task.
+      parameters:
+        - $ref: '#/components/parameters/ProjectNumber'
+        - $ref: '#/components/parameters/TaskNumber'
+      responses:
+        '200':
+          description: Ready-for-PR task details
+
+  /projects/{project_number}/tasks/{task_number}/withdraw-from-pr:
+    post:
+      operationId: harnoq_task_withdraw_from_pr
+      summary: Pull a ready_for_pr task back for rework (manager-only write)
+      description: >
+        Returns a ready_for_pr task to in_progress, for a problem found after the
+        quality gate closed but before anything merged. Requires a reason
+        naming what must change; it becomes the task's blocking_issues.
+        A fresh qa run must judge
+        every acceptance criterion again before the gate can reopen. Re-enter
+        coding through start_coding, the same door a qa needs_fix uses.
+        Refused with 409 once the linked PR is merged — the code is already in
+        the default branch, so the honest path there is mark_completed
+        followed by reopen_completed, which also withdraws the Feature's
+        satisfied status from downstream tasks.
+      parameters:
+        - $ref: '#/components/parameters/ProjectNumber'
+        - $ref: '#/components/parameters/TaskNumber'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  description: >
+                    What the delivery must change. Plain text. Required — the
+                    next coder round has nothing to act on without it.
+      responses:
+        '200':
+          description: Task returned to fixing
+
+  /projects/{project_number}/tasks/{task_number}/dependencies:
+    post:
+      operationId: harnoq_task_add_dependencies
+      summary: Add explicit TASK dependencies atomically (manager-only write)
+      description: >
+        Resolve every TASK-* business number and validate cycles before commit;
+        an invalid or cyclic member leaves no partial dependency edges.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [depends_on_task_numbers]
+              properties:
+                depends_on_task_numbers:
+                  type: array
+                  items: {type: string}
+                  description: TASK-* business numbers that must complete first.
+      parameters:
+        - $ref: '#/components/parameters/ProjectNumber'
+        - $ref: '#/components/parameters/TaskNumber'
+      responses:
+        '200':
+          description: Dependencies added
+
+  /projects/{project_number}/tasks/{task_number}/realign-basis:
+    post:
+      operationId: harnoq_task_realign_basis
+      summary: Record that a suspect task still holds (manager-only write)
+      description: >
+        A task is created against the DESIGN-* as it read at that moment, and
+        that version is recorded. If the design is revised afterwards, reading
+        the task reports suspect=true with the version it was created against
+        and the version now. This action records the judgement "I read the
+        design change and this task as written still stands", after which the
+        flag clears. It changes no content and no status, and it is not a gate:
+        suspect blocks nothing on its own. If the task does NOT still stand,
+        revise or withdraw it instead — never call this just to clear a flag.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: >
+                    REQUIRED when the task is already completed: there this
+                    asserts that merged code still satisfies a design that
+                    has since changed, and nothing re-runs to check. Say what
+                    was checked. If it no longer holds, reopen_completed.
+      parameters:
+        - $ref: '#/components/parameters/ProjectNumber'
+        - $ref: '#/components/parameters/TaskNumber'
+      responses:
+        '200':
+          description: Task with its basis re-recorded at the current design version
+
+  /skills/source-requirement:
+    post:
+      operationId: harnoq_source_requirement
+      summary: Read or write source requirements
+      description: >
+        Source Requirement / SourceRequirement is the sole requirement layer — raw user material, not a
+        INPUT-. It shares the 3-state lifecycle (draft,
+        needs_clarification, confirmed) — confirm has no
+        required-field checklist, so raw_content stays free text, but every
+        INPUT-* in a project must be confirmed before the constitution stage
+        can begin. action=get|list are read-only.
+        action=create|update|append_content|confirm|reopen
+        are writes; actor, session_id and idempotency_key are optional (audit
+        trail only — writes are NOT deduped, every call re-runs).
+        Prefer the explicit create/update/append/confirm/reopen
+        tools below instead of hiding intent inside action=...
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillRequest'
+      responses:
+        '200':
+          description: Source requirement envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /projects/{project_number}/tasks/{task_number}/dependencies/remove:
+    post:
+      operationId: harnoq_task_remove_dependencies
+      summary: Remove direct TASK dependencies (manager-only write)
+      description: Removes the listed dependency edges atomically while the task is claimable or source-backed and needs_revision.
+      parameters:
+        - $ref: '#/components/parameters/ProjectNumber'
+        - $ref: '#/components/parameters/TaskNumber'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskDependenciesRequest'
+      responses:
+        '200':
+          description: Updated task dependencies
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /projects/{project_number}/source-requirements/{source_requirement_number}/assignee:
+    post:
+      operationId: harnoq_source_requirement_assign
+      summary: Assign an INPUT-* to a registered USER-* account
+      description: Administrator access required. Assignment leaves content, confirmation status and content versions unchanged.
+      parameters:
+        - $ref: '#/components/parameters/ProjectNumber'
+        - name: source_requirement_number
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [assignee_number]
+              properties:
+                assignee_number:
+                  type: string
+                  nullable: true
+                  description: Registered USER-* number, or null to clear.
+      responses:
+        '200':
+          description: Requirement with assignee, assignee_number and assignee_user; no raw database ids.
+
+  /projects/{project_number}/delivery-items/{item_number}/assignee:
+    post:
+      operationId: harnoq_delivery_item_assign
+      summary: Assign an INTEG-*/SYS-* to a registered USER-* account
+      description: Administrator access required. Assignment leaves status, executable evidence and inventory receipts unchanged.
+      parameters:
+        - $ref: '#/components/parameters/ProjectNumber'
+        - name: item_number
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [assignee_number]
+              properties:
+                assignee_number:
+                  type: string
+                  nullable: true
+                  description: Registered USER-* number, or null to clear.
+      responses:
+        '200':
+          description: Item with assignee, assignee_number and assignee_user; no raw database ids.
+
+  /skills/source-requirement-create:
+    post:
+      operationId: harnoq_source_requirement_create
+      summary: Create a source requirement
+      description: >
+        Explicit write tool for creating a source requirement. Use this instead
+        of the generic source-requirement tool when the intent is clearly to add
+        a new input. If source_type is omitted, the skill falls back to
+        `manual_note`. `description` is accepted as an alias of `raw_content`.
+        Use this for storing new raw user material. Do not use it when the
+        user is asking to modify an existing INPUT-* object.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SourceRequirementCreateRequest'
+            example:
+              project_number: P1
+              actor: openwebui-user
+              session_id: chat-session-1
+              idempotency_key: input-create-1
+              title: Login flow requirement
+              source_type: new_feature
+              raw_content: User wants username/password login.
+      responses:
+        '200':
+          description: Source requirement envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/source-requirement-update:
+    post:
+      operationId: harnoq_source_requirement_update
+      summary: Update a source requirement
+      description: >
+        Explicit write tool for editing an existing source requirement. The
+        payload must include source_requirement_number plus the fields to change. Use the
+        business number `INPUT-*`; do not send raw ids and do not invent
+        fields like source_requirement_id. `description` is accepted as an alias of
+        `raw_content`. Use this when the user says to revise, edit, expand, or
+        correct an existing SourceRequirement.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SourceRequirementUpdateRequest'
+            example:
+              actor: openwebui-user
+              session_id: chat-session-1
+              idempotency_key: input-update-1
+              source_requirement_number: P1-INPUT-6
+              title: Login flow requirement (revised)
+              raw_content: User wants username/password login with remember me.
+      responses:
+        '200':
+          description: Source requirement envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/source-requirement-append-content:
+    post:
+      operationId: harnoq_source_requirement_append_content
+      summary: Append text to a source requirement
+      description: >
+        Explicit write tool for appending text to an existing SourceRequirement
+        raw_content field. Use this when the user says to add another bullet,
+        add item 16, append a note, or otherwise extend an existing INPUT-*
+        document. The payload must include source_requirement_number and
+        raw_content_to_append. The returned envelope status indicates whether
+        the append succeeded.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SourceRequirementAppendContentRequest'
+            example:
+              source_requirement_number: P1-INPUT-6
+              raw_content_to_append: "16. Paginate the audit log so one request never loads the full history."
+      responses:
+        '200':
+          description: Source requirement envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/source-requirement-confirm:
+    post:
+      operationId: harnoq_source_requirement_confirm
+      summary: Confirm a source requirement
+      description: >
+        Explicit write tool for confirming an existing source requirement.
+        Bare status flip — no required-field checklist, raw_content stays free
+        text. Confirm only once the requirement discussion has genuinely gone
+        deep (goal / acceptance / constraints / failure modes) and the user
+        agrees; every INPUT-* in the project must be confirmed before the
+        constitution stage can begin.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SourceRequirementConfirmRequest'
+            example:
+              actor: openwebui-user
+              session_id: chat-session-1
+              idempotency_key: input-confirm-1
+              source_requirement_number: P1-INPUT-6
+      responses:
+        '200':
+          description: Source requirement envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/source-requirement-reopen:
+    post:
+      operationId: harnoq_source_requirement_reopen
+      summary: Reopen a source requirement
+      description: >
+        Explicit write tool for moving a confirmed source requirement back
+        to draft so it can be revised. This is the only way to edit a locked
+        INPUT-*.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SourceRequirementLifecycleRequest'
+            example:
+              actor: openwebui-user
+              session_id: chat-session-1
+              idempotency_key: input-reopen-1
+              source_requirement_number: P1-INPUT-6
+      responses:
+        '200':
+          description: Source requirement envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/design-case:
+    post:
+      operationId: harnoq_design_case
+      summary: Read or write design cases
+      description: >
+        DesignCase is the proposed solution for a FEATURE-* module boundary (it carries
+        no INPUT-* link of its own). DesignCase
+        ids use the prefix DESIGN-. Lifecycle states are draft,
+        needs_clarification and confirmed. action=get|list are
+        read-only; list without feature_number returns all project designs,
+        and list with feature_number returns designs for that FEATURE-*.
+        action=create|update|confirm|reopen|realign_basis|delete|restore are
+        writes; actor, session_id and idempotency_key are optional (audit
+        trail only — writes are NOT deduped, every call re-runs).
+        confirm requires the design case to carry all required fields,
+        including test_strategy. confirmed designs must reopen before
+        content edits. Prefer the explicit create/update/confirm/
+        reopen/... tools below instead of hiding intent inside action=...
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillRequest'
+      responses:
+        '200':
+          description: Design case envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/change-request:
+    post:
+      operationId: harnoq_change_request
+      summary: Read or write change requests
+      description: >
+        ChangeRequest (CR-*) is the governance record for changing something
+        that already has work built on it. Editing a DRAFT needs no change
+        request - just edit it. States run
+        proposed to analyzing to approved to applied to closed; anything not yet
+        applied can also be closed (dropped). action=get|list|impact are
+        read-only; impact answers "what would this break" WITHOUT proposing
+        anything. action=create|analyze|approve|apply|close are writes.
+        Applying records that the edit was made - it never edits an object
+        itself, and downstream staleness shows up on its own as suspect. Once a
+        task has SHIPPED the default answer to a change is an increment
+        (target_type=new: a new requirement, its design, its task), not a
+        rewrite of the delivery.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillRequest'
+      responses:
+        '200':
+          description: Change request envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/change-request-create:
+    post:
+      operationId: harnoq_change_request_create
+      summary: Propose a change
+      description: >
+        Explicit write tool for proposing a CR-* against a DESIGN-*, a
+        delivered TASK-*, or 'new'. reason is required. Name EVERY object the
+        change rewrites — the main one as design_number/task_number, the rest
+        in also_changes_numbers — because analyze walks the targets and finds
+        nothing under one you left out. The next step is analyze: the
+        downstream chain is what decides the cost.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeRequestCreateRequest'
+            example:
+              project_number: P1
+              actor: openwebui-user
+              session_id: chat-session-1
+              design_number: P1-DESIGN-3
+              reason: The acceptance threshold agreed with the user turned out to be unreachable on the fixed stack.
+      responses:
+        '200':
+          description: Change request envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/change-request-analyze:
+    post:
+      operationId: harnoq_change_request_analyze
+      summary: Analyse a change request's impact
+      description: >
+        Walks the chain under the target (DESIGN to TASK) and
+        records every downstream object with the response for how far it
+        got: still editable, confirmed, in flight, or already shipped.
+        Report the impact. A bounded repair found during Integration/System may
+        remain in its existing source TASK without a CR; follow the active
+        delivery method's bounded_repair rule. For a CR that is needed, an
+        ordinary defect repair restoring the confirmed
+        contract within existing authorization, the manager continues to approval
+        without another user confirmation. Ask only when actual impact requires a
+        product decision or exceeds the existing authorization; follow approval_policy
+        in the active Change/Integration/System method.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeRequestLifecycleRequest'
+            example:
+              project_number: P1
+              actor: openwebui-user
+              session_id: chat-session-1
+              change_request_number: P1-CR-2
+      responses:
+        '200':
+          description: Change request envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/change-request-approve:
+    post:
+      operationId: harnoq_change_request_approve
+      summary: Approve a change request
+      description: >
+        A bounded INTEG-*/SYS-* repair already covered by its source TASK requires
+        no CR. When the repair crosses that boundary, after analysis the manager
+        may approve an ordinary defect repair restoring
+        the confirmed contract within existing authorization without another user
+        confirmation. Record the violated clause, failure evidence, repair boundary
+        and authorization basis in the CR reason or bound source TASK. Never invent
+        a fresh user approval. New scope, product trade-offs, waivers, lower acceptance
+        or quality/security standards, fixed-constraint changes, significant extra
+        cost and destructive actions require the applicable user authorization.
+        Approval does not replace repair, QA, PR, apply or close. Follow approval_policy
+        in the active Change/Integration/System method.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeRequestLifecycleRequest'
+            example:
+              project_number: P1
+              actor: openwebui-user
+              session_id: chat-session-1
+              change_request_number: P1-CR-2
+      responses:
+        '200':
+          description: Change request envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/change-request-apply:
+    post:
+      operationId: harnoq_change_request_apply
+      summary: Mark a change request applied
+      description: >
+        Records that the upstream edit has actually been made. Edits nothing
+        itself: make the change through the normal update/confirm tools
+        first. Downstream objects then read as suspect on their own.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeRequestLifecycleRequest'
+            example:
+              project_number: P1
+              actor: openwebui-user
+              session_id: chat-session-1
+              change_request_number: P1-CR-2
+      responses:
+        '200':
+          description: Change request envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/change-request-close:
+    post:
+      operationId: harnoq_change_request_close
+      summary: Close a change request
+      description: >
+        Terminal. resolution is required, because 'closed after applying'
+        and 'closed because we decided not to' are the two things a later
+        reader needs to tell apart.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeRequestLifecycleRequest'
+            example:
+              project_number: P1
+              actor: openwebui-user
+              session_id: chat-session-1
+              change_request_number: P1-CR-2
+              resolution: applied; P1-DESIGN-3 re-confirmed and P1-TASK-7 realigned
+      responses:
+        '200':
+          description: Change request envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/feature:
+    post:
+      operationId: harnoq_feature
+      summary: Read or write features
+      description: >
+        Feature is the lightweight persisted plan/grouping unit between
+        mined INPUT-* and DesignCase records. Feature ids
+        use the prefix FEATURE-. action=get|list are read-only. action=create|
+        update|assign|delete are writes; actor, session_id and idempotency_key are
+        optional (audit trail only — writes are NOT deduped, every call
+        re-runs). Prefer the explicit create/update/assign/delete tools
+        below instead of hiding intent inside action=...
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillRequest'
+      responses:
+        '200':
+          description: Feature envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/feature-create:
+    post:
+      operationId: harnoq_feature_create
+      summary: Create a feature
+      description: >
+        Explicit write tool for creating a Feature identified through information
+        hiding and bounded-context analysis, with its
+        two classification tags (orientation, subdomain_type), an optional project-level
+        foundation_kind, an optional is_spike flag,
+        and optional dependency edges. A feature carries no INPUT-* link at
+        all — it is identified by name/description alone.
+        Use this after the user confirms the Feature map, before creating
+        DESIGN-* records.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeatureCreateRequest'
+            example:
+              actor: openwebui-user
+              session_id: chat-session-1
+              idempotency_key: feature-create-1
+              name: 登录功能
+      responses:
+        '200':
+          description: Feature envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/feature-update:
+    post:
+      operationId: harnoq_feature_update
+      summary: Update a feature
+      description: >
+        Explicit write tool for editing an existing Feature's metadata,
+        classification tags, or dependency edges. The payload must include feature_number plus the fields to
+        change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeatureUpdateRequest'
+      responses:
+        '200':
+          description: Feature envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/feature-assign:
+    post:
+      operationId: harnoq_feature_assign
+      summary: Assign or clear a feature assignee
+      description: >
+        Explicit write tool for setting or clearing a feature's assignee.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeatureAssignRequest'
+      responses:
+        '200':
+          description: Feature envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/feature-delete:
+    post:
+      operationId: harnoq_feature_delete
+      summary: Delete a feature
+      description: >
+        Explicit write tool for soft-deleting a feature. Get explicit user
+        confirmation before calling it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeatureDeleteRequest'
+      responses:
+        '200':
+          description: Feature envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/constitution:
+    post:
+      operationId: harnoq_constitution
+      summary: Read or write the project constitution
+      description: >
+        The project constitution is the single per-project governance record
+        (fixed stack, quality bar, UI conventions, NFR baseline, boundaries),
+        consolidated from the confirmed INPUT-* set BETWEEN requirement clarification
+        and design. It is a singleton keyed by project_number (no business
+        number). action=get is read-only. action=update|confirm|reopen are
+        writes; prefer the explicit tools below.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillRequest'
+      responses:
+        '200':
+          description: Constitution envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/glossary:
+    post:
+      operationId: harnoq_glossary
+      summary: Read or write the project glossary
+      description: >
+        Project-level terminology that prevents wording and translation drift.
+        action=get is read-only; action=create|update|delete are writes. Terms
+        have no TERM-* number: term_native is their project-local identifier.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillRequest'
+      responses:
+        '200':
+          description: Glossary envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/glossary-create:
+    post:
+      operationId: harnoq_glossary_create
+      summary: Add a glossary term
+      description: >
+        Explicit write tool. Confirm a new concept with the user before adding
+        its original native term and authoritative English identifier name.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GlossaryCreateRequest'
+      responses:
+        '200':
+          description: Glossary envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/glossary-update:
+    post:
+      operationId: harnoq_glossary_update
+      summary: Update a glossary term
+      description: >
+        Explicit write tool. existing_term_native identifies the current term;
+        term_native may replace it. Updating does not trigger lifecycle review.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GlossaryUpdateRequest'
+      responses:
+        '200':
+          description: Glossary envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/glossary-delete:
+    post:
+      operationId: harnoq_glossary_delete
+      summary: Delete a glossary term
+      description: Explicit write tool. Get explicit user confirmation before calling it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GlossaryDeleteRequest'
+      responses:
+        '200':
+          description: Glossary envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/integration-item:
+    post:
+      operationId: harnoq_integration_item
+      summary: Read or write INTEG-* integration items
+      description: >
+        Canonical Integration-stage surface. It reads or writes only assembly,
+        seam and duplicate INTEG-* items; evidence and ordinary repairs belong
+        directly to the active Integration stage run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillRequest'
+      responses:
+        '200':
+          description: INTEG item envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /projects/{project_number}/integration-items/{item_number}:
+    get:
+      operationId: harnoq_integration_item_get
+      summary: Read one Integration finding by business number
+      parameters:
+        - in: path
+          name: project_number
+          required: true
+          schema: {type: string}
+        - in: path
+          name: item_number
+          required: true
+          schema: {type: string}
+      responses:
+        '200':
+          description: INTEG-* item
+          content:
+            application/json:
+              schema: {type: object}
+
+  /skills/integration-item-create:
+    post:
+      operationId: harnoq_integration_item_create
+      summary: Create one INTEG-* item
+      description: The canonical Integration-stage create operation. The item is covered by exact executable evidence in the active Integration run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryItemCreateRequest'
+      responses:
+        '200':
+          description: INTEG item envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/integration-item-update:
+    post:
+      operationId: harnoq_integration_item_update
+      summary: Update one INTEG-* item
+      description: >
+        The canonical Integration-stage update operation; covered requires exact
+        executable evidence on the current active stage run. Outside Integration,
+        only a user-authorized waiver of an existing item is allowed, using only
+        item_number, status=waived and waive_reason. No new TASK/PR is needed solely
+        to record that decision. Creation, coverage and scope edits remain gated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryItemUpdateRequest'
+      responses:
+        '200':
+          description: INTEG item envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/system-item:
+    post:
+      operationId: harnoq_system_item
+      summary: Read or write SYS-* system items
+      description: Canonical System-stage surface for journey and NFR SYS-* items.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillRequest'
+      responses:
+        '200':
+          description: SYS item envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/system-item-create:
+    post:
+      operationId: harnoq_system_item_create
+      summary: Create one SYS-* item
+      description: The canonical System-stage create operation. The item is later covered by its directly owning completed TASK-* and exact QA test.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryItemCreateRequest'
+      responses:
+        '200':
+          description: SYS item envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/system-item-update:
+    post:
+      operationId: harnoq_system_item_update
+      summary: Update one SYS-* item
+      description: >
+        The canonical System-stage update operation; covered requires exact
+        executable evidence on the current active stage run. Outside System,
+        only a user-authorized waiver of an existing item is allowed, using only
+        item_number, status=waived and waive_reason. A repair need not finish first;
+        no new TASK/PR is needed solely to record the decision. Creation, coverage
+        and scope edits remain gated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryItemUpdateRequest'
+      responses:
+        '200':
+          description: SYS item envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/integration-inventory-validate:
+    post:
+      operationId: harnoq_integration_inventory_validate
+      summary: Validate an Integration Round-1 manifest
+      description: >
+        Mandatory structural gate before an Integration inventory is created.
+        Harnoq computes the exact assembly/seam/duplicate mapping and returns
+        valid=false with errors when rows, payloads, business numbers or counts
+        do not reconcile. It creates no workflow object or INTEG-*; valid=true
+        stores a receipt authorizing creation of the exact validated payloads.
+        No separate per-item or technical-batch approval is required.
+        At close-out use harnoq_integration_inventory_get and harnoq_integration_inventory_revise
+        to reuse saved sections, or resubmit the complete current manifest with successful
+        role=test evidence naming every covered item's exact QA test in its
+        command. valid=true validates inventory; integration_complete=true
+        records final completion on the current basis. completion_errors explains
+        unfinished audit obligations. A zero-gap pass can complete without a new
+        task or PR; read project context next. New delivery or changed source/item
+        state invalidates the old audit.
+        external_resources is mandatory: audit every capability DESIGN and scan
+        production configuration/code. verified resources require actual successful
+        resource-check and resource-call evidence on the configured production path,
+        with uses_test_double=false. Missing/invalid/unverified resources return
+        resource_requests describing preparation and block completion. A waiver
+        must reference its live user-waived INTEG with exactly matching source.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntegrationInventoryValidateRequest'
+      responses:
+        '200':
+          description: Validation result and standard skill envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/integration-inventory-get:
+    post:
+      operationId: harnoq_integration_inventory_get
+      summary: Recover the saved Integration inventory and current blockers
+      description: >
+        Read-only. Returns the complete saved manifest, validation_id, revision_token,
+        basis_changed, design/item changes, required reruns and completion errors.
+        Review affected code and evidence before revision; never merely copy hashes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project_number]
+              properties:
+                project_number: {type: string}
+      responses:
+        '200':
+          description: Saved manifest, current obligations and review token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/integration-inventory-revise:
+    post:
+      operationId: harnoq_integration_inventory_revise
+      summary: Merge evidence and section updates into a saved inventory and revalidate
+      description: >
+        First get the inventory and review changes, then echo validation_id as
+        base_validation_id and revision_token as reviewed_revision_token.
+        Evidence is upserted by key; supplied sections replace entire sections,
+        omitted sections are retained, and empty lists clear sections. No deep merge.
+        The server reconciles round and recorded created-item references and runs
+        the original full validator. Changed bases require fresh exact test reruns
+        for covered items. State drift requires another get/review; never label old
+        outputs as fresh runs. valid=true is not integration_complete=true.
+        Payload preparation and validation corrections do not require user approval.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntegrationInventoryReviseRequest'
+      responses:
+        '200':
+          description: Complete validation result and completion obligations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/system-inventory-validate:
+    post:
+      operationId: harnoq_system_inventory_validate
+      summary: Validate a System Round-1 inventory
+      description: Mandatory server audit before source-based SYS writes; binds INPUT coverage, committed NFRs, drivers, rerun evidence, and exact payloads to a receipt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SystemInventoryValidateRequest'
+      responses:
+        '200':
+          description: Validation result and standard skill envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/constitution-update:
+    post:
+      operationId: harnoq_constitution_update
+      summary: Write the project constitution (draft)
+      description: >
+        Explicit write tool. Upserts the singleton constitution and edits its
+        six governance sections (system_nature, fixed_stack, quality_bar,
+        ui_conventions, nfr_baseline, boundaries). Consolidate these from the
+        confirmed INPUT-* set — do not invent governance. Editable only while
+        draft/needs_clarification; reopen a confirmed one first.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConstitutionUpdateRequest'
+            example:
+              project_number: P1
+              actor: openwebui-user
+              session_id: chat-session-1
+              idempotency_key: constitution-update-1
+              fixed_stack: Flask + SQLite, offline single-user
+              nfr_baseline: "批量导入吞吐 >= 500 条/分钟 (待确认)"
+      responses:
+        '200':
+          description: Constitution envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/constitution-confirm:
+    post:
+      operationId: harnoq_constitution_confirm
+      summary: Confirm the project constitution
+      description: >
+        Explicit write tool. draft/needs_clarification -> confirmed. Design may
+        not begin until the constitution is confirmed. Rejected if empty.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillRequest'
+      responses:
+        '200':
+          description: Constitution envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/constitution-reopen:
+    post:
+      operationId: harnoq_constitution_reopen
+      summary: Reopen a locked constitution
+      description: >
+        Explicit write tool. confirmed -> draft. The only way to edit a
+        confirmed constitution.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillRequest'
+      responses:
+        '200':
+          description: Constitution envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/design-case-create:
+    post:
+      operationId: harnoq_design_case_create
+      summary: Create a design case
+      description: >
+        Explicit write tool for creating a design case under a FEATURE-*
+        (feature_number is required). A design carries no INPUT-* link
+        of its own — read the relevant INPUT-* material and cite it in
+        prose (problem_statement) instead.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DesignCaseCreateRequest'
+            example:
+              actor: openwebui-user
+              session_id: chat-session-1
+              idempotency_key: design-create-1
+              feature_number: P1-FEATURE-3
+      responses:
+        '200':
+          description: Design case envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/design-case-update:
+    post:
+      operationId: harnoq_design_case_update
+      summary: Update a design case
+      description: >
+        Explicit write tool for editing an existing design case. The payload
+        must include design_number plus the fields to change. Use this while
+        drafting or revising the solution details for an existing DESIGN-*.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DesignCaseUpdateRequest'
+            example:
+              actor: openwebui-user
+              session_id: chat-session-1
+              idempotency_key: design-update-1
+              design_number: P1-DESIGN-3
+              selected_solution: Password login with secure session cookies
+              selection_reason: Smallest viable scope for phase 1.
+      responses:
+        '200':
+          description: Design case envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/design-case-confirm:
+    post:
+      operationId: harnoq_design_case_confirm
+      summary: Confirm a design case
+      description: >
+        Explicit write tool for confirming an existing design case after all
+        required fields are present. This should happen only after the design
+        has been discussed and accepted, not while it is still exploratory.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DesignCaseConfirmRequest'
+            example:
+              actor: openwebui-user
+              session_id: chat-session-1
+              idempotency_key: design-confirm-1
+              design_number: P1-DESIGN-3
+      responses:
+        '200':
+          description: Design case envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/design-case-reopen:
+    post:
+      operationId: harnoq_design_case_reopen
+      summary: Reopen a design case
+      description: >
+        Explicit write tool for moving a confirmed design case
+        back to draft so it can be revised. This replaces the old reject
+        concept: sending a design back for rework now means reopening it.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DesignCaseLifecycleRequest'
+            example:
+              actor: openwebui-user
+              session_id: chat-session-1
+              idempotency_key: design-reopen-1
+              design_number: P1-DESIGN-3
+      responses:
+        '200':
+          description: Design case envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/design-case-realign-basis:
+    post:
+      operationId: harnoq_design_case_realign_basis
+      summary: Record that a suspect design still holds
+      description: >
+        Confirming a DESIGN-* records which version of its FEATURE-* it was
+        confirmed against. When that is
+        revised later the design reads back with suspect=true and a
+        suspect_upstream list. This action records "I read the change and this
+        design still holds as written" and clears it. It edits nothing and
+        gates nothing. If the design does not still hold, reopen and revise it
+        — re-confirming records a fresh basis anyway. Do not call this to
+        silence the flag without reading the upstream change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DesignCaseLifecycleRequest'
+            example:
+              actor: openwebui-user
+              session_id: chat-session-1
+              idempotency_key: design-realign-1
+              design_number: P1-DESIGN-3
+      responses:
+        '200':
+          description: Design case envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/design-case-delete:
+    post:
+      operationId: harnoq_design_case_delete
+      summary: Soft-delete a design case
+      description: >
+        Explicit write tool for soft-deleting an existing design case. Always
+        get explicit user confirmation before calling this tool. Deletion is
+        recoverable through design-case-restore.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DesignCaseLifecycleRequest'
+            example:
+              actor: openwebui-user
+              session_id: chat-session-1
+              idempotency_key: design-delete-1
+              design_number: P1-DESIGN-3
+      responses:
+        '200':
+          description: Design case envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/design-case-restore:
+    post:
+      operationId: harnoq_design_case_restore
+      summary: Restore a deleted design case
+      description: >
+        Explicit write tool for restoring a soft-deleted design case from the
+        recycle bin. Include project_number here; deleted rows are not
+        discoverable through the live-object project inference path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DesignCaseRestoreRequest'
+            example:
+              project_number: P1
+              actor: openwebui-user
+              session_id: chat-session-1
+              idempotency_key: design-restore-1
+              design_number: P1-DESIGN-3
+      responses:
+        '200':
+          description: Design case envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /skills/design-case-create-task:
+    post:
+      operationId: harnoq_task_create
+      summary: Create a task directly under a confirmed design
+      description: >
+        Explicit write tool for creating a claimable DevelopmentTask (TASK-*)
+        directly under an existing confirmed design case. No intermediate
+        object and no separate generation step. The payload must include
+        design_number and the required task fields. DESIGN→TASK is strictly
+        one-to-one. New scope uses an approved CR source-backed TASK
+        instead of a second design-backed task.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+                $ref: '#/components/schemas/DesignCaseCreateTaskRequest'
+
+  /skills/task-create-from-sources:
+    post:
+      operationId: harnoq_task_create_from_sources
+      summary: Create one source-backed TASK-* from approved CRs
+      description: >
+        For change_request, supply an owning Feature and approved CR numbers.
+        Integration repairs are recorded directly on the active run and INTEG-* items.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SourceTaskCreateRequest'
+      responses:
+        '200':
+          description: Source task envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+            example:
+              actor: openwebui-user
+              session_id: chat-session-1
+              idempotency_key: design-task-1
+              design_number: P1-DESIGN-3
+              title: Implement login flow
+              task_type: feature
+              goal: Users can log in
+              acceptance_criteria: Login succeeds with valid credentials
+              constraints: Must not store plaintext passwords
+              non_goals: No social login in phase 1
+      responses:
+        '200':
+          description: Development task envelope
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+
+  /projects/{project_number}/delivery-stage-runs/{stage}:
+    post:
+      summary: Start one project-wide Integration or System delivery run
+      parameters:
+        - name: project_number
+          in: path
+          required: true
+          schema: {type: string}
+        - name: stage
+          in: path
+          required: true
+          schema: {type: string, enum: [integration, system]}
+      responses: {'201': {description: Stage run}}
+  /projects/{project_number}/delivery-stage-runs/{run_number}:
+    patch:
+      summary: Record direct delivery-run evidence or a resource blocker
+      parameters:
+        - name: project_number
+          in: path
+          required: true
+          schema: {type: string}
+        - name: run_number
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryStageRunEvidenceRequest'
+      responses: {'200': {description: Stage run}}
+  /projects/{project_number}/delivery-stage-runs/{run_number}/update:
+    post:
+      summary: Record direct delivery-run evidence or a resource blocker via MCP
+      parameters:
+        - name: project_number
+          in: path
+          required: true
+          schema: {type: string}
+        - name: run_number
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryStageRunEvidenceRequest'
+      responses: {'200': {description: Stage run}}
+  /projects/{project_number}/delivery-stage-runs/{run_number}/close:
+    post:
+      summary: Close a current delivery run after inventory and item evidence gates
+      parameters:
+        - name: project_number
+          in: path
+          required: true
+          schema: {type: string}
+        - name: run_number
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryStageRunEvidenceRequest'
+      responses: {'200': {description: Closed stage run}}
+  /projects/{project_number}/delivery-stage-runs/{run_number}/abandon:
+    post:
+      summary: End an uncloseable run after a confirmed basis change
+      parameters:
+        - name: project_number
+          in: path
+          required: true
+          schema: {type: string}
+        - name: run_number
+          in: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: {type: string}
+      responses: {'200': {description: Abandoned stage run}}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    ProjectNumber:
+      name: project_number
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Project business number, e.g. P1.
+    TaskNumber:
+      name: task_number
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Task business number, e.g. P1-TASK-7.
+  schemas:
+    ReadRequest:
+      type: object
+      required: [project_number]
+      properties:
+        project_number:
+          type: string
+          description: Harnoq project's business number, e.g. P1. Never the raw database id.
+        actor:
+          type: string
+          description: Identifier of the calling user or agent. Optional for reads; omitted values fall back to a generic OpenWebUI actor.
+        session_id:
+          type: string
+          description: Chat/conversation session id, for tracing. Optional for reads; omitted values fall back to a generic OpenWebUI session id.
+
+    SkillRequest:
+      type: object
+      required: [project_number, action]
+      properties:
+        project_number:
+          type: string
+          description: Harnoq project's business number, e.g. P1. Never the raw database id.
+        actor:
+          type: string
+          description: >
+            Optional identifier of the calling user or agent, recorded for the
+            audit trail only.
+        session_id:
+          type: string
+          description: >
+            Optional chat/conversation session id, recorded for the audit
+            trail only.
+        idempotency_key:
+          type: string
+          description: >
+            Optional, recorded for the audit trail only. Writes are NOT
+            deduped by it — every call re-runs the write action.
+        action:
+          type: string
+          description: >
+            One of this endpoint's read or write actions. For explicit tools
+            such as source-requirement-update or design-case-create-task, the
+            action is implied by the tool itself; callers should use the
+            explicit tool rather than inventing their own tool names.
+        payload:
+          type: object
+          description: >
+            Action-specific fields. Object references use the business
+            number, never the raw database id — e.g. source_requirement_number,
+            feature_number, design_number (P1-INPUT-12, P1-FEATURE-5,
+            P1-DESIGN-3, ...). Do not invent fields like
+            source_requirement_id or item_id.
+            SourceRequirement uses INPUT-* (source requirements are the only requirement layer),
+            DesignCase uses DESIGN-*, DevelopmentTask uses TASK-*.
+          additionalProperties: true
+
+    SourceRequirementCreateRequest:
+      type: object
+      required: [project_number, title]
+      properties:
+        project_number:
+          type: string
+          description: Target project business number, e.g. P1.
+        actor:
+          type: string
+          description: Optional caller identity. Omitted values fall back server-side.
+        session_id:
+          type: string
+          description: Optional session identity. Omitted values fall back server-side.
+        idempotency_key:
+          type: string
+          description: Optional, recorded for the audit trail only. Writes are NOT deduped by it — every call re-runs the write action.
+        title:
+          type: string
+          description: Short label for this input document. Plain text.
+        source_type:
+          type: string
+          description: Optional. Falls back to manual_note when omitted. Must be one of the listed values; do not invent others.
+          enum: [initial_document, new_feature, requirement_change, bug_report, test_feedback, meeting_minutes, manual_note]
+        raw_content:
+          type: string
+          description: >
+            Raw user-provided material, captured verbatim. Markdown — use
+            real line breaks, never the literal characters backslash-n.
+        description:
+          type: string
+          description: >
+            Alias of raw_content for generic tool callers. Markdown — use
+            real line breaks, never the literal characters backslash-n.
+        content:
+          type: string
+          description: >
+            Alias of raw_content for generic tool callers. Markdown — use
+            real line breaks, never the literal characters backslash-n.
+        source:
+          type: string
+          description: Optional free-text origin note. Plain text.
+        submitted_by:
+          type: string
+          description: Who submitted this content. Plain text.
+        attachments:
+          type: array
+          description: List of attachment references.
+          items:
+            type: string
+
+    SourceRequirementUpdateRequest:
+      type: object
+      required: [source_requirement_number]
+      properties:
+        project_number:
+          type: string
+          description: Optional when source_requirement_number already exists; server can infer the project.
+        actor:
+          type: string
+        session_id:
+          type: string
+        idempotency_key:
+          type: string
+        source_requirement_number:
+          type: string
+          description: Existing SourceRequirement business number, e.g. P1-INPUT-6.
+        input_number:
+          type: string
+          description: Legacy alias of source_requirement_number.
+        title:
+          type: string
+          description: Short label for this input document. Plain text.
+        source_type:
+          type: string
+          description: Must be one of the listed values; do not invent others.
+          enum: [initial_document, new_feature, requirement_change, bug_report, test_feedback, meeting_minutes, manual_note]
+        raw_content:
+          type: string
+          description: >
+            Replacement full content. Markdown — use real line breaks, never
+            the literal characters backslash-n.
+        description:
+          type: string
+          description: >
+            Alias of raw_content for generic tool callers. Markdown — use
+            real line breaks, never the literal characters backslash-n.
+        content:
+          type: string
+          description: >
+            Alias of raw_content for generic tool callers. Markdown — use
+            real line breaks, never the literal characters backslash-n.
+        source:
+          type: string
+          description: Optional free-text origin note. Plain text.
+        submitted_by:
+          type: string
+          description: Who submitted this content. Plain text.
+        attachments:
+          type: array
+          description: List of attachment references.
+          items:
+            type: string
+
+    SourceRequirementAppendContentRequest:
+      type: object
+      required: [source_requirement_number, raw_content_to_append]
+      properties:
+        project_number:
+          type: string
+          description: Optional when source_requirement_number already exists; server can infer the project.
+        actor:
+          type: string
+          description: Optional caller identity. Omitted values fall back server-side.
+        session_id:
+          type: string
+          description: Optional session identity. Omitted values fall back server-side.
+        idempotency_key:
+          type: string
+          description: Optional, recorded for the audit trail only. Writes are NOT deduped by it — every call re-runs the write action.
+        source_requirement_number:
+          type: string
+          description: Existing SourceRequirement business number, e.g. P1-INPUT-6.
+        input_number:
+          type: string
+          description: Legacy alias of source_requirement_number.
+        raw_content_to_append:
+          type: string
+          description: >
+            Text to append to the existing raw_content. Markdown — use real
+            line breaks, never the literal characters backslash-n.
+        separator:
+          type: string
+          description: Optional separator inserted before the appended text. Defaults to a newline. Plain text.
+        additional_content:
+          type: string
+          description: >
+            Alias of raw_content_to_append for generic tool callers. Markdown
+            — use real line breaks, never the literal characters backslash-n.
+        text:
+          type: string
+          description: >
+            Alias of raw_content_to_append for generic tool callers. Markdown
+            — use real line breaks, never the literal characters backslash-n.
+        description:
+          type: string
+          description: >
+            Alias accepted by the server through raw_content normalization.
+            Markdown — use real line breaks, never the literal characters
+            backslash-n.
+        content:
+          type: string
+          description: >
+            Alias accepted by the server through raw_content normalization.
+            Markdown — use real line breaks, never the literal characters
+            backslash-n.
+
+    FeatureCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        project_number:
+          type: string
+          description: The project to create this feature in.
+        actor:
+          type: string
+        session_id:
+          type: string
+        idempotency_key:
+          type: string
+        name:
+          type: string
+          description: Short label for this Feature. Plain text.
+        description:
+          type: string
+          description: >
+            This Feature's DESIGN-ENTRY CARD — the only context a later agent
+            has if it opens this one FEATURE without re-reading the whole
+            INPUT-*. NOT optional decoration and NOT a restatement of the
+            name. Write FOUR separate markdown lines, one per label below —
+            never collapse into one paragraph, each label must visibly
+            appear: (a) 归属: what this Feature owns/is responsible for and WHY
+            it is independently planned; (b) 契约: what contract it exposes
+            upward and what it depends on; (c) 关键数据: key data/state/
+            invariants it owns; (d) 不做: what it explicitly does NOT own.
+            Skipping a label or merging them into prose is unacceptable.
+            Markdown — use real line breaks, never the literal characters
+            backslash-n.
+        assignee:
+          type: string
+          description: Legacy registered account name or USER-* number. Prefer assignee_number.
+        assignee_number:
+          type: string
+          nullable: true
+          description: Registered USER-* owner number, or null to leave unassigned. Requires administrator access.
+        orientation:
+          type: string
+          enum: [foundation, vertical]
+          description: >
+            Feature orientation. foundation = project platform layer users do not
+            touch directly; vertical = a user-visible feature slice. Defaults
+            to vertical.
+        foundation_kind:
+          type: string
+          nullable: true
+          enum: [architecture, ui, integration, system]
+          description: >
+            Optional identity for a project-level Feature only.
+            architecture = Architecture Foundation; ui = UI Foundation
+            (Design System + App Shell); integration = the delivery gate that
+            assembles the delivered parts into a product that starts and
+            reconciles what the parallel work duplicated; system = the delivery
+            gate that exercises the assembled product from the user's side.
+            A project may have one live Feature of each kind.
+        subdomain_type:
+          type: string
+          enum: [core, supporting, generic]
+          description: >
+            DDD subdomain type. core = system's raison d'etre (spike first);
+            supporting = needed but not differentiating; generic =
+            industry-solved, buy/reuse. Defaults to supporting.
+        is_spike:
+          type: boolean
+          description: Marks a core Feature whose first task should validate a walking skeleton.
+        depends_on_feature_numbers:
+          type: array
+          description: >
+            Dependency edges — the FEATURE-* this Feature depends on. The
+            server rejects a change that would make the dependency graph cyclic.
+          items:
+            type: string
+
+    FeatureUpdateRequest:
+      type: object
+      required: [feature_number]
+      properties:
+        project_number:
+          type: string
+          description: Optional when feature_number already exists; server can infer the project.
+        actor:
+          type: string
+        session_id:
+          type: string
+        idempotency_key:
+          type: string
+        feature_number:
+          type: string
+          description: Existing feature business number, e.g. P1-FEATURE-5.
+        name:
+          type: string
+          description: Short label for this Feature. Plain text.
+        description:
+          type: string
+          description: >
+            This Feature's DESIGN-ENTRY CARD — the only context a later agent
+            has if it opens this one FEATURE without re-reading the whole
+            INPUT-*. NOT optional decoration and NOT a restatement of the
+            name. Write FOUR separate markdown lines, one per label below —
+            never collapse into one paragraph, each label must visibly
+            appear: (a) 归属: what this Feature owns/is responsible for and WHY
+            it is independently planned; (b) 契约: what contract it exposes
+            upward and what it depends on; (c) 关键数据: key data/state/
+            invariants it owns; (d) 不做: what it explicitly does NOT own.
+            Skipping a label or merging them into prose is unacceptable.
+            Markdown — use real line breaks, never the literal characters
+            backslash-n.
+        assignee:
+          type: string
+          description: Legacy registered account name or USER-* number. Prefer assignee_number.
+        assignee_number:
+          type: string
+          nullable: true
+          description: Registered USER-* owner number, or null to clear. Assignment changes require administrator access.
+        orientation:
+          type: string
+          enum: [foundation, vertical]
+          description: Feature orientation. Plain text enum.
+        foundation_kind:
+          type: string
+          nullable: true
+          enum: [architecture, ui, integration, system]
+          description: >
+            Optional identity for a project-level Feature only.
+            architecture = Architecture Foundation; ui = UI Foundation
+            (Design System + App Shell); integration = the delivery gate that
+            assembles the delivered parts into a product that starts and
+            reconciles what the parallel work duplicated; system = the delivery
+            gate that exercises the assembled product from the user's side.
+            Set null to clear.
+        subdomain_type:
+          type: string
+          enum: [core, supporting, generic]
+          description: DDD subdomain type. Plain text enum.
+        is_spike:
+          type: boolean
+          description: Marks a core Feature whose first task should validate a walking skeleton. Plain boolean.
+        depends_on_feature_numbers:
+          type: array
+          description: >
+            REPLACES the whole dependency-edge list (not a delta). The server
+            rejects a change that would make the dependency graph cyclic.
+          items:
+            type: string
+
+    FeatureAssignRequest:
+      type: object
+      required: [feature_number]
+      properties:
+        project_number:
+          type: string
+          description: Optional when feature_number already exists; server can infer the project.
+        actor:
+          type: string
+        session_id:
+          type: string
+        idempotency_key:
+          type: string
+        feature_number:
+          type: string
+          description: Existing feature business number, e.g. P1-FEATURE-5.
+        assignee:
+          type: string
+          nullable: true
+          description: Legacy registered account name or USER-* number. Prefer assignee_number.
+        assignee_number:
+          type: string
+          nullable: true
+          description: Registered USER-* owner number, or null to clear. Requires administrator access.
+
+    FeatureDeleteRequest:
+      type: object
+      required: [feature_number]
+      properties:
+        project_number:
+          type: string
+          description: Optional when feature_number already exists; server can infer the project.
+        actor:
+          type: string
+        session_id:
+          type: string
+        idempotency_key:
+          type: string
+        feature_number:
+          type: string
+          description: Existing feature business number, e.g. P1-FEATURE-5.
+
+    ConstitutionUpdateRequest:
+      type: object
+      required: [project_number]
+      properties:
+        project_number:
+          type: string
+          description: Target project business number, e.g. P1.
+        actor:
+          type: string
+        session_id:
+          type: string
+        idempotency_key:
+          type: string
+        system_nature:
+          type: string
+          description: >
+            System-type / pressure-surface analysis. Markdown — use real
+            line breaks, never the literal characters backslash-n.
+        fixed_stack:
+          type: string
+          description: >
+            The fixed stack/library declarations, deduped. Markdown — use
+            real line breaks, never the literal characters backslash-n.
+        quality_bar:
+          type: string
+          description: >
+            Test bar / definition of done. Markdown — use real line breaks,
+            never the literal characters backslash-n.
+        ui_conventions:
+          type: string
+          description: >
+            Page style and interaction conventions. Markdown — use real
+            line breaks, never the literal characters backslash-n.
+        nfr_baseline:
+          type: string
+          description: >
+            Performance/scale/latency targets as a markdown table (metric,
+            target, strength, applies-to). strength is `commitment` (a number
+            the project promises, which a design must later prove) or
+            `direction` (a stance with no number to measure); a table without
+            the column is read as all commitments. Only commitments are asked
+            for an owning design and only commitments should become acceptance
+            criteria. Markdown — use real line breaks, never the literal
+            characters backslash-n.
+        boundaries:
+          type: string
+          description: >
+            Out-of-scope + high-risk irreversible operations
+            (always/ask-first/never). Markdown — use real line breaks,
+            never the literal characters backslash-n.
+        status:
+          type: string
+          description: Plain text lifecycle enum.
+
+    GlossaryCreateRequest:
+      type: object
+      required: [project_number, term_native, term_en]
+      properties:
+        project_number:
+          type: string
+          description: Target project business number, e.g. P1.
+        actor:
+          type: string
+        session_id:
+          type: string
+        idempotency_key:
+          type: string
+        term_native:
+          type: string
+          description: The user's original domain term. Plain text.
+        term_en:
+          type: string
+          description: Authoritative English identifier name for code. Plain text.
+        definition_en:
+          type: string
+          description: English definition. Markdown — use real line breaks, never the literal characters backslash-n.
+        avoid:
+          type: string
+          description: Forbidden near-synonyms, one per line. Plain text.
+
+    GlossaryUpdateRequest:
+      type: object
+      required: [project_number, existing_term_native]
+      properties:
+        project_number:
+          type: string
+          description: Target project business number, e.g. P1.
+        actor:
+          type: string
+        session_id:
+          type: string
+        idempotency_key:
+          type: string
+        existing_term_native:
+          type: string
+          description: Current project-local native term that identifies the row.
+        term_native:
+          type: string
+          description: Replacement native term. Plain text.
+        term_en:
+          type: string
+          description: Replacement authoritative English identifier. Plain text.
+        definition_en:
+          type: string
+          description: Replacement English definition. Markdown — use real line breaks, never the literal characters backslash-n.
+        avoid:
+          type: string
+          description: Replacement forbidden near-synonyms, one per line. Plain text.
+
+    GlossaryDeleteRequest:
+      type: object
+      required: [project_number, term_native]
+      properties:
+        project_number:
+          type: string
+          description: Target project business number, e.g. P1.
+        actor:
+          type: string
+        session_id:
+          type: string
+        idempotency_key:
+          type: string
+        term_native:
+          type: string
+          description: Project-local native term that identifies the term to delete.
+
+    TaskUpdateRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        title: {type: string, minLength: 1}
+        goal:
+          type: string
+          minLength: 1
+          description: 'Task goal. Markdown; use real line breaks, never the literal characters backslash-n.'
+        acceptance_criteria:
+          type: string
+          minLength: 1
+          description: 'Binding verification criteria; retain all unwaived source obligations. Markdown; use real line breaks, never the literal characters backslash-n.'
+        constraints:
+          type: string
+          description: 'Markdown; use real line breaks, never the literal characters backslash-n.'
+        non_goals:
+          type: string
+          description: 'Markdown; use real line breaks, never the literal characters backslash-n.'
+        task_type:
+          type: string
+          enum: [feature, bug_fix, refactor, test, mock_env, mock_data, doc, infrastructure]
+        priority:
+          type: string
+          enum: [low, normal, high, urgent]
+        complexity:
+          type: string
+          enum: [small, medium, large, xlarge]
+        risk_level:
+          type: string
+          enum: [low, medium, high]
+
+    DeliveryStageRunEvidenceRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        code_revision: {type: string}
+        design_revision: {type: string}
+        branch: {type: string}
+        merge_reference: {type: string}
+        blocked_reason: {type: string}
+        evidence:
+          description: Submit a JSON object directly. Integration QA requires role=qa, item_numbers, command, output, exit_code=0 and current code_revision. Serialized JSON is also accepted.
+          oneOf:
+            - type: object
+            - type: string
+        integration_rerun_evidence:
+          description: A JSON array of checks with command, output, exit_code=0 and current code_revision. Serialized JSON is also accepted.
+          oneOf:
+            - type: array
+              items: {type: object}
+            - type: string
+
+    SourceTaskCreateRequest:
+      type: object
+      required: [project_number, source_kind, title, task_type, goal, acceptance_criteria]
+      properties:
+        project_number: {type: string, description: Project business number.}
+        actor: {type: string}
+        session_id: {type: string}
+        idempotency_key: {type: string}
+        source_kind:
+          type: string
+          enum: [change_request]
+        feature_number: {type: string, description: Owning Feature for the approved CR task.}
+        change_request_numbers:
+          type: array
+          items: {type: string}
+          description: Approved CR-* numbers; multiple CRs may share this one TASK.
+        title: {type: string}
+        task_type: {type: string}
+        goal: {type: string}
+        acceptance_criteria: {type: string}
+        constraints: {type: string}
+        non_goals: {type: string}
+        priority: {type: string}
+        complexity: {type: string}
+        risk_level: {type: string}
+
+    TaskDependenciesRequest:
+      type: object
+      required: [depends_on_task_numbers]
+      properties:
+        depends_on_task_numbers:
+          type: array
+          minItems: 1
+          items: {type: string}
+          description: TASK-* business numbers to add or remove atomically.
+
+    DeliveryItemCreateRequest:
+      type: object
+      required: [project_number, kind, subject, source, found_in_round]
+      properties:
+        project_number:
+          type: string
+          description: Target project business number, e.g. P1.
+        actor:
+          type: string
+        session_id:
+          type: string
+        idempotency_key:
+          type: string
+        kind:
+          type: string
+          enum: [assembly, seam, duplicate, journey, nfr]
+          description: >
+            What this item is derived from. Integration permits
+            assembly/seam/duplicate; System permits journey/nfr. Cross-stage
+            Agent writes are rejected.
+        subject:
+          type: string
+          description: >
+            What it is. Multi-line for a journey's ordered steps. Markdown —
+            use real line breaks, never the literal characters backslash-n.
+        source:
+          type: string
+          description: >
+            Required provenance line: the exact fully qualified business number
+            and field that declared the finding, or the exact repository command
+            or code location that discovered it. Never abbreviate a returned
+            business number. Plain text.
+        driver:
+          type: string
+          description: Required for kind=journey/nfr — how it is driven; omitted for integration kinds. Plain text.
+        found_in_round:
+          type: integer
+          minimum: 1
+          description: >
+            Required inventory pass number: max(existing found_in_round)+1,
+            or 1 when none exist.
+        validation_id:
+          type: string
+          description: Required for receipt-bound Integration/System kinds; latest valid inventory receipt.
+        source_row_key:
+          type: string
+          description: Required for receipt-bound Integration/System kinds; validated manifest row key.
+
+    SystemInventoryValidateRequest:
+      type: object
+      required: [project_number, manifest]
+      properties:
+        project_number: {type: string}
+        actor: {type: string}
+        session_id: {type: string}
+        manifest:
+          $ref: '#/components/schemas/SystemInventoryManifest'
+
+    SystemInventoryManifest:
+      type: object
+      required: [found_in_round, input_audits, nfr_audits, proposed_items, rerun_evidence]
+      properties:
+        found_in_round: {type: integer, minimum: 1}
+        input_audits:
+          type: array
+          items:
+            type: object
+            required: [input_number, journey_keys]
+            properties:
+              input_number: {type: string}
+              journey_keys: {type: array, items: {type: string}}
+              no_journey_reason: {type: string}
+        nfr_audits:
+          type: array
+          items:
+            type: object
+            required: [nfr_key, proposed_item_key]
+            properties:
+              nfr_key: {type: string}
+              proposed_item_key: {type: string}
+        proposed_items:
+          type: array
+          items:
+            type: object
+            required: [key, kind, subject, source, driver, found_in_round]
+            properties:
+              key: {type: string}
+              kind: {type: string, enum: [journey, nfr]}
+              subject: {type: string}
+              source: {type: string}
+              driver: {type: string}
+              found_in_round: {type: integer, minimum: 1}
+              existing_item_number: {type: string}
+        rerun_evidence:
+          type: array
+          items:
+            type: object
+            required: [item_number, command, exit_code, stdout, stderr]
+            properties:
+              item_number: {type: string}
+              command: {type: string}
+              exit_code: {type: integer}
+              stdout: {type: string}
+              stderr: {type: string}
+
+    IntegrationInventoryValidateRequest:
+      type: object
+      required: [project_number, manifest]
+      properties:
+        project_number:
+          type: string
+          description: Target project business number, e.g. P1.
+        actor:
+          type: string
+        session_id:
+          type: string
+        manifest:
+          $ref: '#/components/schemas/IntegrationInventoryManifest'
+
+    IntegrationInventoryReviseRequest:
+      type: object
+      required: [project_number, base_validation_id, reviewed_revision_token, evidence_updates]
+      properties:
+        project_number: {type: string}
+        base_validation_id: {type: string}
+        reviewed_revision_token: {type: string}
+        evidence_updates:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrationEvidenceRecord'
+        section_updates:
+          $ref: '#/components/schemas/IntegrationInventorySectionUpdates'
+
+    IntegrationInventorySectionUpdates:
+      type: object
+      additionalProperties: false
+      description: Omitted sections are retained; supplied sections fully replace the previous section.
+      properties:
+        production_entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrationProductionEntryRecord'
+        design_coverage:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrationDesignCoverageRecord'
+        source_scans:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrationSourceScanRecord'
+        declared_parts:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrationDeclaredPartRecord'
+        assembly_rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrationAssemblyRow'
+        seams:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrationSeamRow'
+        identifier_collisions:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrationIdentifierCollisionRecord'
+        duplicate_candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrationDuplicateCandidateRecord'
+        proposed_items:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrationProposedItemRecord'
+        external_resources:
+          $ref: '#/components/schemas/IntegrationExternalResources'
+
+    IntegrationInventoryManifest:
+      type: object
+      required:
+        - found_in_round
+        - evidence
+        - production_entries
+        - design_coverage
+        - source_scans
+        - declared_parts
+        - assembly_rows
+        - seams
+        - identifier_collisions
+        - duplicate_candidates
+        - proposed_items
+        - external_resources
+      properties:
+        found_in_round:
+          type: integer
+          minimum: 1
+        evidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrationEvidenceRecord'
+        production_entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrationProductionEntryRecord'
+        design_coverage:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrationDesignCoverageRecord'
+        source_scans:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrationSourceScanRecord'
+        declared_parts:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrationDeclaredPartRecord'
+        assembly_rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrationAssemblyRow'
+        seams:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrationSeamRow'
+        identifier_collisions:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrationIdentifierCollisionRecord'
+        duplicate_candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrationDuplicateCandidateRecord'
+        proposed_items:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrationProposedItemRecord'
+        external_resources:
+          $ref: '#/components/schemas/IntegrationExternalResources'
+
+    IntegrationExternalResources:
+      type: object
+      required: [scan_evidence_keys, design_audits, resources]
+      properties:
+        scan_evidence_keys:
+          type: array
+          minItems: 1
+          items: {type: string}
+          description: Source-scan evidence auditing production configuration and code for external dependencies.
+        design_audits:
+          type: array
+          items:
+            type: object
+            required: [design_number, resource_keys]
+            properties:
+              design_number: {type: string}
+              resource_keys: {type: array, items: {type: string}}
+              no_resources_reason: {type: string}
+        resources:
+          type: array
+          items:
+            $ref: '#/components/schemas/IntegrationExternalResource'
+
+    IntegrationExternalResource:
+      type: object
+      required: [key, name, source, configuration, status]
+      properties:
+        key: {type: string}
+        name: {type: string}
+        source:
+          type: string
+          description: Exact design/code/configuration provenance. A waiver INTEG must carry the same source.
+        configuration:
+          type: string
+          description: Actual configured resource version/location or endpoint; never credentials.
+        status: {type: string, enum: [verified, missing, invalid, unverified, waived]}
+        entry_keys: {type: array, items: {type: string}}
+        uses_test_double: {type: boolean}
+        operation: {type: string}
+        observed_result: {type: string}
+        readiness_evidence_key: {type: string}
+        call_evidence_key: {type: string}
+        preparation:
+          type: string
+          description: Required unless verified/waived; source/version, preparation steps, configured location and verification command, including any user action/cost.
+        waiver_item_number: {type: string}
+
+    IntegrationEvidenceRecord:
+      type: object
+      additionalProperties: false
+      required: [key, role, command, exit_code, stdout, stderr]
+      properties:
+        key: {type: string}
+        role:
+          type: string
+          enum:
+            - entry-launch
+            - entry-observation
+            - entry-launch-observation
+            - source-scan
+            - skeleton
+            - contract
+            - caller
+            - owner
+            - test
+            - other
+            - resource-check
+            - resource-call
+        command:
+          type: string
+          description: Literal copy-pasteable command, without prose or ellipsis.
+        exit_code: {type: integer}
+        expected_exit_codes:
+          type: array
+          items: {type: integer}
+          default: [0]
+        stdout:
+          type: string
+          description: Relevant raw stdout inline; empty string when empty.
+        stderr:
+          type: string
+          description: Relevant raw stderr inline; empty string when empty.
+
+    IntegrationProductionEntryRecord:
+      type: object
+      additionalProperties: false
+      required:
+        - key
+        - name
+        - entry_type
+        - operational_invocation
+        - observable_boundary
+        - executes_delivered_behavior
+        - launch_evidence_key
+        - observation_evidence_key
+      properties:
+        key: {type: string}
+        name: {type: string}
+        entry_type:
+          type: string
+          enum: [service, cli, browser, scheduled]
+        operational_invocation:
+          type: string
+          description: Actual delivered-product launch/load; never build/test/dev/preview.
+        observable_boundary: {type: string}
+        executes_delivered_behavior: {type: boolean}
+        launch_evidence_key: {type: string}
+        observation_evidence_key: {type: string}
+
+    IntegrationDesignCoverageRecord:
+      type: object
+      additionalProperties: false
+      required:
+        - key
+        - design_number
+        - selected_solution_sha256
+        - design_scope_sha256
+        - declared_part_keys
+        - seam_keys
+      properties:
+        key:
+          type: string
+          description: Must equal the fully qualified design_number.
+        design_number: {type: string}
+        selected_solution_sha256: {type: string}
+        design_scope_sha256: {type: string}
+        declared_part_keys:
+          type: array
+          items: {type: string}
+        seam_keys:
+          type: array
+          items: {type: string}
+
+    IntegrationSourceScanRecord:
+      type: object
+      additionalProperties: false
+      required:
+        - key
+        - language
+        - roots
+        - scan_evidence_key
+        - collision_keys
+        - different_name_candidate_keys
+      properties:
+        key: {type: string}
+        language: {type: string}
+        roots:
+          type: array
+          minItems: 1
+          items: {type: string}
+        scan_evidence_key: {type: string}
+        collision_keys:
+          type: array
+          items: {type: string}
+        different_name_candidate_keys:
+          type: array
+          items: {type: string}
+
+    IntegrationDeclaredPartRecord:
+      type: object
+      additionalProperties: false
+      required: [key, design_number, name, declaration]
+      properties:
+        key: {type: string}
+        design_number:
+          type: string
+          description: Fully qualified P*-DESIGN-* business number.
+        name:
+          type: string
+          description: Exactly one part copied from selected_solution.
+        declaration:
+          type: string
+          description: Exact declaration copied verbatim from selected_solution.
+
+    IntegrationAssemblyRow:
+      type: object
+      additionalProperties: false
+      required: [key, reachable, entry_keys, path, gap_key, missing_edge, evidence_keys]
+      properties:
+        key:
+          type: string
+          description: Must equal exactly one declared_parts key.
+        reachable: {type: boolean}
+        entry_keys:
+          type: array
+          items: {type: string}
+        path:
+          type: array
+          items: {type: string}
+        gap_key:
+          type: string
+          nullable: true
+          description: One missing-edge key when unreachable; null when reachable.
+        missing_edge:
+          type: string
+          nullable: true
+          description: Exact missing producer -> consumer edge; null when reachable.
+        evidence_keys:
+          type: array
+          items: {type: string}
+
+    IntegrationSeamRow:
+      type: object
+      additionalProperties: false
+      required:
+        - key
+        - declaring_design_number
+        - producer_design_number
+        - consumer_design_number
+        - producer
+        - consumer
+        - declaration
+        - wiring
+        - wired
+        - integration_verified
+        - evidence_keys
+      properties:
+        key: {type: string}
+        declaring_design_number: {type: string}
+        producer_design_number: {type: string}
+        consumer_design_number: {type: string}
+        producer:
+          type: string
+          description: Exactly one producer endpoint or contract.
+        consumer:
+          type: string
+          description: Exactly one consumer endpoint or contract.
+        declaration:
+          type: string
+          description: Exact seam declaration copied verbatim from the declaring design_scope.
+        wiring: {type: string}
+        wired: {type: boolean}
+        integration_verified:
+          type: boolean
+          description: True only when a passing test directly exercises this seam.
+        test:
+          type: string
+          nullable: true
+          description: Exact test node/command, or null when missing.
+        test_evidence_key:
+          type: string
+          nullable: true
+        evidence_keys:
+          type: array
+          items: {type: string}
+
+    IntegrationImplementationRecord:
+      type: object
+      additionalProperties: false
+      required: [module, identifier]
+      properties:
+        module: {type: string}
+        identifier: {type: string}
+
+    IntegrationIdentifierCollisionRecord:
+      type: object
+      additionalProperties: false
+      required: [key, identifier, implementations, evidence_keys]
+      properties:
+        key: {type: string}
+        identifier:
+          type: string
+          description: Complete identifier exactly equal in every implementation.
+        implementations:
+          type: array
+          minItems: 2
+          items:
+            $ref: '#/components/schemas/IntegrationImplementationRecord'
+        evidence_keys:
+          type: array
+          items: {type: string}
+
+    IntegrationDuplicateCandidateRecord:
+      type: object
+      additionalProperties: false
+      required:
+        - key
+        - discovery
+        - collision_keys
+        - implementations
+        - responsibility
+        - verdict
+        - caller_semantics
+        - divergence_is_defect
+        - rationale
+        - evidence_keys
+      properties:
+        key: {type: string}
+        discovery:
+          type: string
+          enum: [exact-name, different-name]
+        collision_keys:
+          type: array
+          items: {type: string}
+        implementations:
+          type: array
+          minItems: 2
+          items:
+            $ref: '#/components/schemas/IntegrationImplementationRecord'
+        responsibility: {type: string}
+        verdict:
+          type: string
+          enum: [converge, retain]
+        canonical_owner: {type: string, nullable: true}
+        caller_semantics: {type: string}
+        divergence_is_defect: {type: boolean}
+        boundary_fit: {type: string, nullable: true}
+        baseline_evidence_key: {type: string, nullable: true}
+        rationale: {type: string}
+        evidence_keys:
+          type: array
+          items: {type: string}
+        contract_evidence_keys:
+          type: array
+          items: {type: string}
+        caller_evidence_keys:
+          type: array
+          items: {type: string}
+        owner_evidence_keys:
+          type: array
+          items: {type: string}
+
+    IntegrationProposedItemRecord:
+      type: object
+      additionalProperties: false
+      required: [key, kind, subject, source, found_in_round]
+      properties:
+        key:
+          type: string
+          description: Exactly one assembly-gap, unsatisfied-seam, or converge key.
+        kind:
+          type: string
+          enum: [assembly, seam, duplicate]
+        subject:
+          type: string
+          description: Complete standalone proposed content; no shared tail/reference.
+        source:
+          type: string
+          description: Complete standalone provenance with qualified business numbers.
+        found_in_round: {type: integer, minimum: 1}
+        existing_item_number: {type: string, nullable: true}
+
+    DeliveryItemUpdateRequest:
+      type: object
+      required: [item_number]
+      properties:
+        project_number:
+          type: string
+          description: Optional when item_number already exists; server can infer the project.
+        actor:
+          type: string
+        session_id:
+          type: string
+        idempotency_key:
+          type: string
+        item_number:
+          type: string
+          description: Existing INTEG-* or SYS-* business number.
+        kind:
+          type: string
+          enum: [assembly, seam, duplicate, journey, nfr]
+        subject:
+          type: string
+          description: >
+            Replacement content. Markdown — use real line breaks, never the
+            literal characters backslash-n.
+        source:
+          type: string
+          description: >
+            Replacement provenance line; may not be blank. Copy fully qualified
+            business numbers exactly. Plain text.
+        driver:
+          type: string
+          description: Replacement driving method (kind=journey/nfr only). Plain text.
+        status:
+          type: string
+          enum: [open, covered, waived]
+          description: >
+            covered requires current executable stage-run evidence; waived
+            requires waive_reason — both enforced server-side.
+        covered_by:
+          type: string
+          description: Required when status=covered. Name the exact check discharging this item.
+        evidence_command:
+          type: string
+          description: Exact executable command used for this item.
+        evidence_output:
+          type: string
+          description: Raw output from the command.
+        evidence_exit_code:
+          type: integer
+          description: Actual exit code; covered requires zero.
+        verified_revision:
+          type: string
+          description: Code revision checked; must match the active stage run.
+        repair_record:
+          type: string
+          description: What failed, what changed and how the result was verified.
+        blocked_reason:
+          type: string
+          description: Required resource or access that blocks this item.
+        waive_reason:
+          type: string
+          description: Required when status=waived. Who decided not to do it, and why.
+        found_in_round:
+          type: integer
+
+    DesignCaseCreateRequest:
+      type: object
+      required: [feature_number]
+      properties:
+        project_number:
+          type: string
+          description: The project to create this design in.
+        actor:
+          type: string
+        session_id:
+          type: string
+        idempotency_key:
+          type: string
+        feature_number:
+          type: string
+          description: >
+            Owning FEATURE-* (required). A design carries no INPUT-* link of
+            its own — read the relevant INPUT-* material and cite it in
+            prose (problem_statement) instead.
+
+    DesignCaseUpdateRequest:
+      type: object
+      required: [design_number]
+      properties:
+        project_number:
+          type: string
+          description: Optional when design_number already exists; server can infer the project.
+        actor:
+          type: string
+        session_id:
+          type: string
+        idempotency_key:
+          type: string
+        design_number:
+          type: string
+          description: Existing design case business number, e.g. P1-DESIGN-3.
+        feature_number:
+          type: string
+          description: Move this design to a different FEATURE-*. Plain text business number.
+        problem_statement:
+          type: string
+          description: >
+            The INPUT-*'s problem restated as a DESIGN problem: what must be
+            decided and why. Markdown — use real line breaks, never the
+            literal characters backslash-n.
+        mined_requirements:
+          type: string
+          description: >
+            需求(我理解你要的是): the requirement as mined at the design stage,
+            one line per requirement, each marked 用户确认 / 我补的(已认可) /
+            待确认. The only place the mined requirement is stored — no
+            upstream object holds it. Markdown — use real line breaks, never
+            the literal characters backslash-n.
+        verifies_nfr:
+          type: string
+          description: >
+            Which project-constitution nfr_baseline COMMITMENT rows THIS
+            design proves, one per line, quoting the metric name as the
+            constitution writes it and saying how it is measured. Write 无
+            when this design proves none — most do not — since confirming
+            requires an answer once the baseline states any commitment, and
+            blank cannot be told apart from never having been asked. Rows
+            marked `direction` are not claimed here and must not become
+            acceptance criteria. A commitment no design claims is a project
+            promise with no owner. Markdown — use real line breaks, never
+            the literal characters backslash-n.
+        design_scope:
+          type: string
+          description: >
+            What this design owns vs. leaves to neighboring DESIGN-*. The
+            requirement itself goes in mined_requirements, not here.
+            Markdown — use real line breaks, never the literal characters
+            backslash-n.
+        non_goals:
+          type: string
+          description: >
+            What this design explicitly does NOT cover. Markdown — use real
+            line breaks, never the literal characters backslash-n.
+        assumptions:
+          type: string
+          description: >
+            Assumptions this design relies on. Markdown — use real line
+            breaks, never the literal characters backslash-n.
+        constraints:
+          type: string
+          description: >
+            Concrete bounds the solution must honor. Markdown — use real
+            line breaks, never the literal characters backslash-n.
+        selected_solution:
+          type: string
+          description: >
+            The chosen rules/behavior and buildable shape (components, data,
+            flow, contracts). Markdown — use real line breaks, never the
+            literal characters backslash-n.
+        selection_reason:
+          type: string
+          description: >
+            Why this option beat the concrete alternatives. Markdown — use
+            real line breaks, never the literal characters backslash-n.
+        risks:
+          type: string
+          description: >
+            Concrete failure modes of the chosen solution and how they're
+            contained. Markdown — use real line breaks, never the literal
+            characters backslash-n.
+        test_strategy:
+          type: string
+          description: >
+            How the tester will prove the acceptance criteria. Markdown —
+            use real line breaks, never the literal characters backslash-n.
+        acceptance_criteria:
+          type: string
+          description: >
+            Verifiable given/when/then covering happy path plus failure/edge
+            paths. Markdown — use real line breaks, never the literal
+            characters backslash-n.
+        reviewer:
+          type: string
+          description: Who reviewed this design. Plain text.
+        impact_areas:
+          type: array
+          description: >
+            List drawn only from a fixed enum: frontend, backend, database,
+            api, auth, infrastructure, ci_cd, testing, security, performance,
+            documentation.
+          items:
+            type: string
+        rejected_solutions:
+          type: array
+          description: List of alternatives considered and rejected, each an object.
+          items:
+            type: object
+            additionalProperties: true
+        open_questions:
+          type: array
+          description: List of unresolved questions for this design.
+          items:
+            type: string
+
+    SourceRequirementConfirmRequest:
+      type: object
+      required: [source_requirement_number]
+      properties:
+        project_number:
+          type: string
+          description: Optional when source_requirement_number already exists; server can infer the project.
+        actor:
+          type: string
+        session_id:
+          type: string
+        idempotency_key:
+          type: string
+        source_requirement_number:
+          type: string
+          description: Existing SourceRequirement business number, e.g. P1-INPUT-6.
+
+    SourceRequirementLifecycleRequest:
+      type: object
+      required: [source_requirement_number]
+      properties:
+        project_number:
+          type: string
+          description: Optional when source_requirement_number already exists and is not deleted; server can infer the project from live rows.
+        actor:
+          type: string
+        session_id:
+          type: string
+        idempotency_key:
+          type: string
+        source_requirement_number:
+          type: string
+          description: Existing SourceRequirement business number, e.g. P1-INPUT-6.
+
+    ChangeRequestCreateRequest:
+      type: object
+      required: [project_number, reason]
+      properties:
+        project_number:
+          type: string
+        actor:
+          type: string
+        session_id:
+          type: string
+        idempotency_key:
+          type: string
+        reason:
+          type: string
+          description: Why the change is needed, in the user's terms.
+        design_number:
+          type: string
+          description: DESIGN-* to be changed. Give this, or target_type=new.
+        task_number:
+          type: string
+          description: >
+            TASK-* whose DELIVERED code is what changes, when no specification
+            moves. Use instead of design_number for a fix to merged work the
+            design still describes correctly.
+        also_changes_numbers:
+          type: array
+          items:
+            type: string
+          description: >
+            Every OTHER DESIGN-*/TASK-* this same change rewrites. The impact
+            analysis is DERIVED from the targets, so a design left off here does
+            not merely go unmentioned — its tasks never enter the blast radius
+            at all.
+        target_type:
+          type: string
+          enum: [design_case, development_task, new]
+          description: >
+            Use 'new' (with no number) when the change is a NEW requirement
+            rather than an edit - the default answer once a task has shipped.
+
+    ChangeRequestLifecycleRequest:
+      type: object
+      required: [change_request_number]
+      properties:
+        project_number:
+          type: string
+          description: Optional when change_request_number already exists; server can infer the project.
+        actor:
+          type: string
+        session_id:
+          type: string
+        idempotency_key:
+          type: string
+        change_request_number:
+          type: string
+          description: Existing ChangeRequest business number, e.g. P1-CR-2.
+        resolution:
+          type: string
+          description: Required by close only - how it ended (made / dropped / rejected).
+
+    DesignCaseConfirmRequest:
+      type: object
+      required: [design_number]
+      properties:
+        project_number:
+          type: string
+          description: Optional when design_number already exists; server can infer the project.
+        actor:
+          type: string
+        session_id:
+          type: string
+        idempotency_key:
+          type: string
+        design_number:
+          type: string
+          description: Existing design case business number, e.g. P1-DESIGN-3.
+
+    DesignCaseLifecycleRequest:
+      type: object
+      required: [design_number]
+      properties:
+        project_number:
+          type: string
+          description: Optional when design_number already exists and is not deleted; server can infer the project from live rows.
+        actor:
+          type: string
+        session_id:
+          type: string
+        idempotency_key:
+          type: string
+        design_number:
+          type: string
+          description: Existing design case business number, e.g. P1-DESIGN-3.
+
+    DesignCaseRestoreRequest:
+      type: object
+      required: [project_number, design_number]
+      properties:
+        project_number:
+          type: string
+          description: Required for restore because deleted rows cannot be used for live-object project inference.
+        actor:
+          type: string
+        session_id:
+          type: string
+        idempotency_key:
+          type: string
+        design_number:
+          type: string
+          description: Deleted design case business number in the recycle bin, e.g. P1-DESIGN-3.
+
+    DesignCaseCreateTaskRequest:
+      type: object
+      required: [design_number, title, task_type, goal, acceptance_criteria, constraints, non_goals]
+      properties:
+        project_number:
+          type: string
+          description: Optional when design_number already exists; server can infer the project.
+        actor:
+          type: string
+        session_id:
+          type: string
+        idempotency_key:
+          type: string
+        design_number:
+          type: string
+          description: Existing design case business number, e.g. P1-DESIGN-3. Must be confirmed.
+        title:
+          type: string
+          description: Short label for this task. Plain text.
+        task_type:
+          type: string
+          description: >
+            Plain text enum: feature, infrastructure, bug_fix, refactor,
+            test, doc, mock_env, mock_data.
+        priority:
+          type: string
+          description: Plain text enum.
+        complexity:
+          type: string
+          description: Plain text enum.
+        risk_level:
+          type: string
+          description: Plain text enum.
+        goal:
+          type: string
+          description: >
+            What this task BUILDS, concrete enough to start coding from.
+            Markdown — use real line breaks, never the literal characters
+            backslash-n.
+        acceptance_criteria:
+          type: string
+          description: >
+            The DESIGN's acceptance_criteria this task must satisfy. A
+            restatement for the reader — qa is checked against the design's
+            criteria and NEVER against these, so criteria invented here are
+            criteria nothing will accept. If the design grew a capability with
+            no criterion judging it, revise and re-confirm the DESIGN first (defer to
+            the design in the default 1:1 case). Markdown — use real line
+            breaks, never the literal characters backslash-n.
+        constraints:
+          type: string
+          description: >
+            Real bounds the task must honor, pulled from the design.
+            Markdown — use real line breaks, never the literal characters
+            backslash-n.
+        non_goals:
+          type: string
+          description: >
+            What this task explicitly does NOT do. Markdown — use real line
+            breaks, never the literal characters backslash-n.
+
+    Envelope:
+      type: object
+      description: Fixed 6-key skill response shape, extended with the resource payload.
+      required: [object_type, object_id, status, change_summary, open_questions, next_step]
+      properties:
+        object_type:
+          type: string
+        object_id:
+          oneOf:
+            - type: string
+            - type: integer
+          description: Id of the primary affected/returned object.
+        status:
+          type: string
+        change_summary:
+          type: string
+          description: Human-readable one-line summary of what happened.
+        open_questions:
+          type: array
+          items:
+            type: string
+        next_step:
+          type: string
+          nullable: true
+      additionalProperties: true

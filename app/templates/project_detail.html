@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}{{ _('项目详情 · Harnoq') }}{% endblock %}
+{% block content %}
+<div id="project-detail-page" data-view="project-detail" data-project-id="{{ project_id }}">
+  <p class="breadcrumb"><a href="{{ url_for('web.projects_list') }}">{{ _('← 所有项目') }}</a></p>
+  {% include "_project_flow_nav.html" %}
+  <div id="detail-status" class="loading" role="status">{{ _('正在加载项目...') }}</div>
+  <div id="detail-error" class="error hidden" role="alert"></div>
+
+  <div id="detail-content" class="hidden" aria-live="polite">
+    <div class="detail-header">
+      <h1>
+        <span id="project-number" class="muted"></span>
+        <span id="project-name"></span>
+        <span id="project-status"></span>
+      </h1>
+      <div class="actions">
+        <button id="download-agent-config-btn" class="action-button" type="button">{{ _('下载 agent 配置') }}</button>
+        <button id="edit-project-btn" class="action-button" type="button">{{ _('编辑') }}</button>
+      </div>
+    </div>
+    <div id="project-description" class="desc markdown-body hidden"></div>
+    <p id="project-summary" class="summary"></p>
+
+    <div class="phase" data-phase="planning">
+      <div class="phase-head">
+        <h2 class="phase-title">{{ _('规划') }} {% if ui_locale == "zh" %}<span class="phase-en">Planning</span>{% endif %}</h2>
+        <p class="phase-note">{{ _('把要造的东西定义清楚，此处不写业务代码。') }}</p>
+      </div>
+      <div class="rail">
+        <section class="stage" data-state="filled">
+          <h2><span class="node"></span>{{ _('原始需求') }}</h2>
+          <p class="summary">{{ _('共') }} <span id="inputs-total">0</span> {{ _('个原始需求') }}</p>
+          <a id="inputs-list-link" class="action-button" href="">{{ _('查看原始需求 →') }}</a>
+        </section>
+
+        <section id="constitution-stage" class="stage">
+          <h2><span class="node"></span>{{ _('项目规范') }}</h2>
+          <p class="summary"><span id="constitution-summary">{{ _('尚未汇总') }}</span></p>
+          <a id="constitution-link" class="action-button" href="">{{ _('查看项目规范 →') }}</a>
+        </section>
+
+        <section id="features-stage" class="stage">
+          <h2><span class="node"></span>{{ _('功能') }}</h2>
+          <p class="summary">{{ _('共') }} <span id="features-total">0</span> {{ _('个功能') }}</p>
+          <a id="features-list-link" class="action-button" href="">{{ _('查看功能 →') }}</a>
+        </section>
+
+        <section id="designs-stage" class="stage">
+          <h2><span class="node"></span>{{ _('设计用例') }}</h2>
+          <p class="summary">{{ _('共') }} <span id="designs-total">0</span> {{ _('个设计用例') }}</p>
+          <a id="designs-list-link" class="action-button" href="">{{ _('查看设计用例 →') }}</a>
+        </section>
+
+      </div>
+    </div>
+
+    <div class="phase" data-phase="build">
+      <div class="phase-head">
+        <h2 class="phase-title">{{ _('构建') }} {% if ui_locale == "zh" %}<span class="phase-en">Build</span>{% endif %}</h2>
+        <p class="phase-note">{{ _('下游仓库里 manager / coder / qa 按约束执行。') }}</p>
+      </div>
+      <div class="rail">
+        <section id="kanban-stage" class="stage">
+          <h2><span class="node"></span>{{ _('开发任务') }}</h2>
+          <p class="summary">{{ _('共') }} <span id="tasks-total">0</span> {{ _('个开发任务（领取 → 编码 → QA → PR → 完成）') }}</p>
+          <a id="tasks-list-link" class="action-button" href="">{{ _('查看开发任务 →') }}</a>
+        </section>
+      </div>
+    </div>
+
+    <!-- The two delivery gates. They are not new entities: their work is
+         ordinary Feature / DESIGN / TASK records, so they get no page of their
+         own and no nav entry. What they DO need is somewhere a human can see
+         that the project owes them — the failure they exist to answer to was a
+         product nobody noticed had never been assembled. -->
+    <div class="phase" data-phase="delivery">
+      <div class="phase-head">
+        <h2 class="phase-title">{{ _('交付') }} {% if ui_locale == "zh" %}<span class="phase-en">Delivery</span>{% endif %}</h2>
+        <p class="phase-note">{{ _('分块并行的账在这里付：接缝、装配、重复实现。全部能力任务完成后开门。') }}</p>
+      </div>
+      <div class="rail">
+        <section id="integration-stage" class="stage">
+          <h2><span class="node"></span>{{ _('集成事项') }}</h2>
+          <p class="summary"><span id="integration-summary">{{ _('尚未到达') }}</span></p>
+          <p class="summary">{{ _('出口断言：交付一个能跑起来的产品') }}</p>
+          <p class="summary">{{ _('集成清单没人管的有') }} <span id="integration-delivery-open">0</span> {{ _('项') }}</p>
+          <a id="integration-list-link" class="action-button" href="">{{ _('查看集成事项 →') }}</a>
+        </section>
+
+        <section id="system-stage" class="stage">
+          <h2><span class="node"></span>{{ _('系统事项') }}</h2>
+          <p class="summary"><span id="system-summary">{{ _('尚未到达') }}</span></p>
+          <p class="summary">{{ _('出口断言：这个产品没有已知 bug') }}</p>
+          <p class="summary">{{ _('系统清单没人管的有') }} <span id="system-delivery-open">0</span> {{ _('项') }}</p>
+          <a id="system-list-link" class="action-button" href="">{{ _('查看系统事项 →') }}</a>
+        </section>
+      </div>
+    </div>
+
+    <!-- Not a step: the glossary never "completes" and is consulted by both
+         phases, so it sits across them rather than inside the sequence. -->
+    <section id="glossary-band" class="phase-band">
+      <div>
+        <h2>{{ _('术语表') }} <span class="phase-band-note">{{ _('贯穿两阶段') }}</span></h2>
+        <p class="summary">{{ _('共') }} <span id="glossary-total">0</span> {{ _('条术语 · 在原始需求阶段按用户原话钉住用词，构建阶段据此命名标识符') }}</p>
+      </div>
+      <a id="glossary-link" class="action-button" href="">{{ _('查看术语表 →') }}</a>
+    </section>
+  </div>
+</div>
+{% endblock %}

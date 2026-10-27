@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}{{ _('用户与工作量 · Harnoq') }}{% endblock %}
+{% block content %}
+<div id="users-page">
+  <div class="detail-header"><h1>{{ _('用户与工作量') }}</h1>
+    {% if g.current_user and g.current_user.role == 'admin' %}<button id="user-add" class="action-button">{{ _('添加用户') }}</button>{% endif %}
+  </div>
+  <div class="action-area inline-form workload-filters">
+    <label>{{ _('项目') }}<select id="work-project"><option value="">{{ _('所有项目') }}</option></select></label>
+    <label>{{ _('完成记录起始日期') }}<input id="work-since" type="date"></label>
+    <label>{{ _('截止日期（不含当天）') }}<input id="work-until" type="date"></label>
+    <button id="work-refresh" class="action-button">{{ _('查询') }}</button>
+  </div>
+  <p class="summary">{{ _('当前任务按负责人和状态统计；期间完成数按完成时的负责人记录，同一任务在所选期间计一次。复杂度分布展示当前任务，不代表实际工时。') }}</p>
+  <p id="users-error" class="form-error" role="alert"></p>
+  <div id="users-table"></div><p id="users-unassigned" class="summary"></p>
+  <section id="user-work-detail" class="card hidden"><h2 id="user-work-title"></h2><div id="user-work-tasks"></div><h3>{{ _('最近操作') }}</h3><div id="user-work-activity"></div></section>
+</div>
+<div id="user-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="user-modal-title">
+  <div class="modal"><h2 id="user-modal-title">{{ _('添加用户') }}</h2>
+    <form id="user-form" class="modal-form">
+      <label for="user-username">{{ _('账号') }}</label>
+      <input id="user-username" type="text" name="username" autocomplete="off" required>
+      <label for="user-display-name">{{ _('显示名称') }}</label>
+      <input id="user-display-name" type="text" name="display_name" required maxlength="128">
+      <label for="user-password">{{ _('密码（编辑时留空保留）') }}</label>
+      <input id="user-password" name="password" type="password" autocomplete="new-password" maxlength="256">
+      <label for="user-role">{{ _('角色') }}</label>
+      <select id="user-role" name="role"><option value="member">{{ _('成员') }}</option><option value="admin">{{ _('管理员') }}</option></select>
+      <label for="user-active">{{ _('状态') }}</label>
+      <select id="user-active" name="is_active"><option value="true">{{ _('启用') }}</option><option value="false">{{ _('停用') }}</option></select>
+      <span id="user-form-error" class="form-error" role="alert"></span>
+      <div class="modal-actions"><button type="button" id="user-cancel">{{ _('取消') }}</button><button type="submit">{{ _('保存') }}</button></div>
+    </form>
+  </div>
+</div>
+{% endblock %}

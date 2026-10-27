@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ _('NFR 覆盖 · Harnoq') }}{% endblock %}
+{% block content %}
+<div id="nfr-coverage-page" data-project-id="{{ project_id }}">
+  <p class="breadcrumb"><a href="{{ url_for('web.design_cases_list', project_id=project_id) }}">{{ _('← 返回设计用例') }}</a></p>
+  {% include "_project_flow_nav.html" %}
+  <h1>{{ _('NFR 覆盖') }} <span id="nfr-count" class="count">0</span></h1>
+  <p class="hint">
+    {{ _('本页把项目规约的 nfr_baseline 和各设计用例的“本设计验证的 NFR”对上,不单独存储。') }}
+    <strong>{{ _('承诺') }}</strong>{{ _('是要被证明的数,没人认领就是一条没人负责的项目承诺;') }}
+    <strong>{{ _('方向') }}</strong>{{ _('只约束设计取向,不要求认领、也不该变成判据。分档写在规约\n    nfr_baseline 表格的 strength 列里,没有这一列时整表按承诺算。要改覆盖情况,\n    去对应的 DESIGN-* 里改,这里跟着变。') }}
+  </p>
+  <div id="nfr-status" class="loading" role="status">{{ _('正在加载 NFR 覆盖...') }}</div>
+  <div id="nfr-error" class="error hidden" role="alert"></div>
+  <div id="nfr-content" class="hidden" aria-live="polite">
+    <div id="nfr-unverified" class="rd-unrecorded hidden" role="alert"></div>
+    <div id="nfr-unmatched" class="rd-unrecorded hidden" role="alert"></div>
+    <div id="nfr-rows"></div>
+  </div>
+</div>
+{% endblock %}

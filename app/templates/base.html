@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="{{ ui_locale }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {% if g.jwt_claims %}<meta name="csrf-token" content="{{ g.jwt_claims.csrf }}">{% endif %}
+  <title>{% block title %}Harnoq{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-brand">
+      <a class="brand" href="{{ url_for('web.projects_list') }}">Harnoq</a>
+      <span class="tagline">{{ _('AI 开发流程看板') }}</span>
+    </div>
+    <select id="language-switch" class="language-switch" aria-label="Language / 中文">
+      <option value="{{ language_url('en') }}" lang="en"{% if ui_locale == 'en' %} selected{% endif %}>English</option>
+      <option value="{{ language_url('zh') }}" lang="zh"{% if ui_locale == 'zh' %} selected{% endif %}>中文</option>
+    </select>
+    <nav class="topnav" aria-label="{{ _('全局功能') }}">
+      <div class="topnav-links">
+      {% if g.current_user %}
+        <a class="topnav-link" href="{{ url_for('web.users_page') }}"{% if request.endpoint == 'web.users_page' %} aria-current="page"{% endif %}>{{ _('用户与工作量') }}</a>
+      {% endif %}
+        <a class="topnav-link" href="{{ url_for('web.config_page') }}"{% if request.endpoint == 'web.config_page' %} aria-current="page"{% endif %}>{{ _('配置说明') }}</a>
+      </div>
+      {% if g.current_user %}
+      <div class="topnav-session">
+        <a class="topnav-account" href="{{ url_for('web.account_page') }}" aria-label="{{ _('我的账号：') }}{{ g.current_user.display_name }}" title="{{ g.current_user.display_name }}"{% if request.endpoint == 'web.account_page' %} aria-current="page"{% endif %}>
+          <span class="topnav-avatar" aria-hidden="true">{{ g.current_user.display_name[:1] | upper }}</span>
+          <span class="topnav-name">{{ g.current_user.display_name }}</span>
+        </a>
+        <button type="button" id="auth-logout" class="topnav-logout">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5H5v14h4M10 12h10m-4-4 4 4-4 4"/></svg>
+          {{ _('退出') }}
+        </button>
+      </div>
+      {% endif %}
+    </nav>
+  </header>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+
+  <div id="project-modal" class="modal-overlay hidden" role="dialog"
+       aria-modal="true" aria-labelledby="project-modal-title">
+    <div class="modal">
+      <h2 id="project-modal-title"></h2>
+      <form id="create-project-form" class="modal-form" novalidate>
+        <label for="project-name">{{ _('项目名称') }}</label>
+        <input type="text" id="project-name" name="name" required autocomplete="off">
+        <label for="project-description">{{ _('项目描述') }}</label>
+        <textarea id="project-description" name="description"></textarea>
+        <label for="project-repo-url">{{ _('代码仓库地址') }}</label>
+        <input type="text" id="project-repo-url" name="repo_url" autocomplete="off">
+        <span id="create-project-error" class="form-error" role="alert"></span>
+        <div class="modal-actions">
+          <button type="button" id="project-modal-cancel">{{ _('取消') }}</button>
+          <button type="submit" id="project-modal-submit">{{ _('保存') }}</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="trash-view-modal" class="modal-overlay hidden" role="dialog"
+       aria-modal="true" aria-labelledby="trash-view-title">
+    <div class="modal">
+      <h2 id="trash-view-title"></h2>
+      <div id="trash-view-body" class="trash-view-body"></div>
+      <div class="modal-actions">
+        <button type="button" id="trash-view-close">{{ _('关闭') }}</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="agent-config-modal" class="modal-overlay hidden" role="dialog"
+       aria-modal="true" aria-labelledby="agent-config-modal-title">
+    <div class="modal">
+      <h2 id="agent-config-modal-title">{{ _('下载统一 agent 配置') }}</h2>
+      <form id="agent-config-form" class="modal-form">
+        <label for="agent-config-flavor">{{ _('客户端') }}</label>
+        <select id="agent-config-flavor" name="flavor">
+          <option value="claude">Claude Code</option>
+          <option value="opencode">opencode</option>
+        </select>
+        <label for="agent-config-model">{{ _('opencode 模型（仅 opencode）') }}</label>
+        <input type="text" id="agent-config-model" name="model"
+               placeholder="{{ _('例如 openai/gpt-5.4，填你 opencode 里已配好的模型') }}">
+        <p class="summary">{{ _('下载一个 Planning/Delivery + Build 共用的 zip，解压到工程仓库根目录即用。manager 自动按人的请求路由；coder/qa 仍只处理单个 TASK-*。opencode 需填一个本地已配置的模型（Claude Code 会继承会话模型，可留空）。') }}</p>
+        <span id="agent-config-error" class="form-error" role="alert"></span>
+        <div class="modal-actions">
+          <button type="button" id="agent-config-cancel">{{ _('取消') }}</button>
+          <button type="submit" id="agent-config-submit">{{ _('下载') }}</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="design-view-modal" class="modal-overlay hidden" role="dialog"
+       aria-modal="true" aria-labelledby="design-view-modal-title">
+    <div class="modal modal-wide">
+      <div class="detail-header">
+        <h2 id="design-view-modal-title">{{ _('设计详情') }}</h2>
+        <div class="actions">
+          <a id="design-view-modal-open" class="action-button" href="#">{{ _('打开设计页') }}</a>
+          <button type="button" id="design-view-modal-close" class="action-button">{{ _('关闭') }}</button>
+        </div>
+      </div>
+      <div id="design-view-modal-status" class="loading" role="status">{{ _('正在加载设计...') }}</div>
+      <div id="design-view-modal-body" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <div id="version-diff-modal" class="modal-overlay hidden" role="dialog"
+       aria-modal="true" aria-labelledby="version-diff-modal-title">
+    <div class="modal modal-wide version-diff-modal">
+      <div class="detail-header">
+        <h2 id="version-diff-modal-title">{{ _('版本差异') }}</h2>
+        <button type="button" id="version-diff-modal-close" class="action-button">{{ _('关闭') }}</button>
+      </div>
+      <div id="version-diff-modal-content" class="version-diff-content" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <div id="toast-container" class="toast-container" aria-live="assertive"></div>
+
+  <script src="{{ url_for('static', filename='vendor/marked.min.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='vendor/purify.min.js') }}" defer></script>
+  {# Diagram pages opt in: mermaid is ~2.5MB, two orders of magnitude past
+     marked/purify, so it is NOT loaded on pages that draw nothing. Deferred
+     scripts run in document order, so it is ready before app.js runs. #}
+  {% block vendor_scripts %}{% endblock %}
+  <script id="harnoq-i18n" type="application/json">{{ ui_messages|tojson }}</script>
+  <script src="{{ url_for('static', filename='i18n.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+  {% if g.current_user %}<script>window.harnoqUser = {{ g.current_user.to_dict()|tojson }};</script>{% endif %}
+  <script src="{{ url_for('static', filename='users.js') }}" defer></script>
+</body>
+</html>

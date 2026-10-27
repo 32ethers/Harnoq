@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ _('登录 · Harnoq') }}{% endblock %}
+{% block content %}
+<section class="action-area" id="login-page">
+  <h1>{{ _('登录 Harnoq') }}</h1>
+  <form id="login-form" class="modal-form">
+    <label for="login-username">{{ _('账号') }}</label>
+    <input id="login-username" type="text" name="username" autocomplete="username" required>
+    <label for="login-password">{{ _('密码') }}</label>
+    <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+    <span id="login-error" class="form-error" role="alert"></span>
+    <div class="modal-actions"><button type="submit">{{ _('登录') }}</button></div>
+  </form>
+</section>
+{% endblock %}

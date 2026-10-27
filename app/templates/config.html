@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}{{ _('配置说明 · Harnoq') }}{% endblock %}
+{% block content %}
+<div id="config-page" data-view="config">
+  <h1>{{ _('配置说明') }}</h1>
+  <p class="page-intro">{{ _('Harnoq 分两个阶段接入 AI 客户端：') }}<strong>{{ _('规划阶段（Planning）') }}</strong>{{ _('（和 AI 聊需求、设计、拆任务）与') }}<strong>{{ _('构建阶段（Build）') }}</strong>{{ _('（下游工程仓库里的 manager/coder/qa 按约束开发）。两个阶段连的是同一个 Harnoq 进程，Web 和 MCP 跑在') }}<strong>{{ _('同一个端口') }}</strong>{{ _('上。') }}</p>
+
+  <section class="config-section">
+    <h2>{{ _('先启动 Harnoq（一条命令）') }}</h2>
+    <ul class="config-steps">
+      <li><code>uv run python main.py</code>{{ _('（监听') }} <code>0.0.0.0:5000</code>{{ _('，Web/OpenAPI 与 MCP 同进程同端口）。当前页面地址：') }}<code>{{ web_base_url }}</code>{{ _('；MCP 端点：') }}<code>{{ mcp_url }}</code>{{ _('。用') }} <code>HARNOQ_MCP_URL</code> {{ _('覆盖 MCP 地址（例如反代场景）。') }}</li>
+    </ul>
+    <p class="config-hint">{{ _('首次用') }} <code>uv run flask --app main create-admin</code> {{ _('创建管理员。登录后在“我的账号”创建个人 MCP/API JWT 凭证，将它设为客户端进程的') }} <code>HARNOQ_API_TOKEN</code> {{ _('环境变量。') }}</p>
+  </section>
+
+  <h1 class="config-phase">{{ _('规划阶段（Planning）') }}</h1>
+  <p class="page-intro">{{ _('在这里和 AI 讨论需求、形成设计结论、拆任务。选一种客户端接入即可。') }}</p>
+
+  <section class="config-section">
+    <h2>{{ _('OpenWebUI（OpenAPI 工具服务器）') }}</h2>
+    <ol class="config-steps">
+      <li>{{ _('OpenWebUI 里') }} <strong>Settings → Tools → Add Tool Server</strong>{{ _('，类型选 “OpenAPI”，地址填') }} <code>{{ web_base_url }}/openapi.json</code>{{ _('（或') }} <code>/openapi.yaml</code>{{ _('）。若分开填 base URL 与 spec path，base URL 末尾不要带') }} <code>/</code>。</li>
+      <li>{{ _('为所用的模型 / 对话启用该工具服务器，每个') }} <code>operationId</code> {{ _('会成为一个可调用工具。') }}</li>
+      <li>{{ _('工具服务器认证设置为 Bearer，填入自己的个人 JWT 凭证；调用记录归属该凭证的用户。') }}</li>
+      <li>{{ _('把下面的系统提示词粘贴到该模型或对话的 System Prompt（仅 OpenWebUI 需要）。') }}</li>
+    </ol>
+    <div class="config-section-head">
+      <h3>{{ _('系统提示词') }}</h3>
+      <button type="button" class="copy-button" data-target="#system-prompt-text">{{ _('复制') }}</button>
+    </div>
+    <p class="config-hint">{{ _('需求拆分等分阶段方法由 Harnoq 在工具响应中动态下发（active_stage_method），无需手动粘贴。') }}</p>
+    {% if system_prompt %}
+    <pre id="system-prompt-text" class="prompt-block">{{ system_prompt }}</pre>
+    {% else %}
+    <p class="empty">{{ _('未找到提示词文件') }} <code>skills/openwebui-system-prompt.md</code>。</p>
+    {% endif %}
+  </section>
+
+  <section class="config-section">
+    <h2>Claude Code / Claude Desktop（MCP）</h2>
+    <p class="config-hint">{{ _('连远程 MCP 端点，配置 URL 和个人 JWT，无需本地 checkout。Claude Code 写进项目根') }} <code>.mcp.json</code> {{ _('或用户级') }} <code>~/.claude.json</code>{{ _('；Claude Desktop 在本机配置中填入自己的 Authorization 凭证后重启。系统提示词无需粘贴（') }}<code>HARNOQ_INSTRUCTIONS</code> {{ _('自动下发）。') }}</p>
+    <div class="config-section-head">
+      <h3>.mcp.json</h3>
+      <button type="button" class="copy-button" data-target="#claude-mcp-config">{{ _('复制') }}</button>
+    </div>
+    <pre id="claude-mcp-config" class="prompt-block">{
+  "mcpServers": {
+    "harnoq": { "type": "http", "url": "{{ mcp_url }}", "headers": { "Authorization": "Bearer ${HARNOQ_API_TOKEN}" } }
+  }
+}</pre>
+    <p class="config-hint"><code>type: "http"</code> {{ _('必填——只有') }} <code>url</code> {{ _('没有') }} <code>type</code> {{ _('会被当成 stdio 服务器而跳过。或用 CLI：') }}<code>claude mcp add --transport http harnoq {{ mcp_url }}</code>。</p>
+  </section>
+
+  <section class="config-section">
+    <h2>Codex（MCP）</h2>
+    <p class="config-hint">{{ _('Codex 支持 remote streamable-http MCP，和上面一样连 URL、无需本地 checkout（需 codex-cli ≥ 0.144）。用 CLI：') }}<code>codex mcp add harnoq --url {{ mcp_url }}</code>{{ _('，或写进') }} <code>~/.codex/config.toml</code>：</p>
+    <div class="config-section-head">
+      <h3>~/.codex/config.toml</h3>
+      <button type="button" class="copy-button" data-target="#codex-mcp-config">{{ _('复制') }}</button>
+    </div>
+    <pre id="codex-mcp-config" class="prompt-block">[mcp_servers.harnoq]
+url = "{{ mcp_url }}"
+bearer_token_env_var = "HARNOQ_API_TOKEN"</pre>
+    <p class="config-hint">{{ _('前提是 Harnoq(') }}<code>uv run python main.py</code>{{ _(')在跑——MCP 已随它同进程启动。') }}</p>
+  </section>
+
+  <h1 class="config-phase">{{ _('项目 Agent（Planning + Build）') }}</h1>
+  <p class="page-intro">{{ _('需要在真实工程仓库里继续规划、做 Integration/System，或执行具体 TASK-* 时，使用同一套项目 Agent。') }}<strong>manager</strong> {{ _('根据人的请求在 Planning/Delivery 与 Build 间切换；') }}<strong>coder / qa</strong> {{ _('处理具体 TASK-* 或集成运行中分配的 INTEG-* 组。生成的配置已指向上面的远程 MCP。') }}</p>
+
+  <section class="config-section">
+    <h2>{{ _('下载并安装统一 agent 配置') }}</h2>
+    <ol class="config-steps">
+      <li>{{ _('在') }}<strong>{{ _('项目详情页') }}</strong>{{ _('点 “下载 agent 配置”，选') }} <code>opencode</code> {{ _('或') }} <code>claude</code>{{ _('，得到一个 zip。') }}</li>
+      <li>{{ _('把 zip') }} <strong>{{ _('解压到工程仓库根目录') }}</strong>{{ _('。opencode 版给') }} <code>AGENTS.md</code> + <code>.opencode/</code>{{ _('；Claude Code 版给') }} <code>CLAUDE.md</code> + <code>.claude/</code>{{ _('。manager 会在项目级请求时先读') }} <code>harnoq_project_context.active_stage_method</code>{{ _('，在明确的 TASK-* 请求时走 task-scoped Build 流程。') }}</li>
+      <li>{{ _('启动客户端前设置自己的') }} <code>HARNOQ_API_TOKEN</code>{{ _('。模板只保存环境变量引用，不保存实际 JWT。') }}</li>
+      <li>{{ _('进不进仓库、怎么提交是团队自己的事——Harnoq 不碰 git。') }}</li>
+    </ol>
+    <div class="config-section-head">
+      <h3>{{ _('命令行等价物（scripts/harnoq-init.py）') }}</h3>
+      <button type="button" class="copy-button" data-target="#harnoq-init-cmd">{{ _('复制') }}</button>
+    </div>
+    <pre id="harnoq-init-cmd" class="prompt-block">uv run python &lt;HARNOQ_PATH&gt;/scripts/harnoq-init.py \
+  --project P1 \
+  --harnoq-url {{ web_base_url }} \
+  --flavor opencode</pre>
+    <p class="config-hint">{{ _('在目标仓库目录里运行，下载并解压该 flavor 的 zip 到当前目录（带路径穿越防护），不做任何 git 操作。') }}</p>
+  </section>
+</div>
+{% endblock %}

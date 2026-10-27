@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}{{ _('原始需求 · Harnoq') }}{% endblock %}
+{% block content %}
+<div id="source-requirements-list-page" data-view="source-requirements-list" data-project-id="{{ project_id }}">
+  <p class="breadcrumb"><a href="{{ url_for('web.project_detail', project_id=project_id) }}">{{ _('← 返回项目') }}</a></p>
+  {% include "_project_flow_nav.html" %}
+  <h1>{{ _('原始需求') }} <span id="ril-count" class="count">0</span></h1>
+
+  <button id="ril-create-btn" class="primary-button" type="button">{{ _('添加原始需求') }}</button>
+  <div id="ril-status" class="loading" role="status">{{ _('正在加载原始需求...') }}</div>
+  <div id="ril-error" class="error hidden" role="alert"></div>
+
+  <div id="ril-content" class="hidden" aria-live="polite">
+    <div id="ril-table-section"></div>
+  </div>
+
+  <section id="ril-trash" class="trash-zone hidden"></section>
+
+  <div id="ril-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="ril-modal-title">
+    <div class="modal">
+      <h2 id="ril-modal-title"></h2>
+      <form id="ril-modal-form" class="modal-form" novalidate>
+        <label for="ril-title">{{ _('标题') }}</label>
+        <input type="text" id="ril-title" name="title" required autocomplete="off">
+        <label for="ril-assignee">{{ _('负责人') }}</label>
+        <select id="ril-assignee" name="assignee_number"><option value="">{{ _('未分配') }}</option></select>
+        <label for="ril-input-type">{{ _('类型') }}</label>
+        <select id="ril-input-type" name="source_type" required>
+          <option value="initial_document">{{ _('初始文档') }}</option>
+          <option value="new_feature">{{ _('新功能') }}</option>
+          <option value="requirement_change">{{ _('需求变更') }}</option>
+          <option value="bug_report">{{ _('缺陷报告') }}</option>
+          <option value="test_feedback">{{ _('测试反馈') }}</option>
+          <option value="meeting_minutes">{{ _('会议纪要') }}</option>
+          <option value="manual_note">{{ _('手动笔记') }}</option>
+        </select>
+        <label for="ril-source">{{ _('来源') }}</label>
+        <input type="text" id="ril-source" name="source" placeholder="{{ _('会议链接、工单号、转述人（选填）') }}" autocomplete="off">
+        <label for="ril-raw-content">{{ _('需求原文') }}</label>
+        <textarea id="ril-raw-content" name="raw_content" placeholder="Markdown"></textarea>
+        <span id="ril-modal-error" class="form-error" role="alert"></span>
+        <div class="modal-actions">
+          <button type="button" id="ril-modal-cancel">{{ _('取消') }}</button>
+          <button type="submit" id="ril-modal-submit">{{ _('保存') }}</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

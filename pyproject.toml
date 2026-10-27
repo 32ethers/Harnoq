@@ -1,0 +1,29 @@
+[project]
+name = "harnoq"
+version = "0.1.0"
+description = "AI development workflow system that constrains AI agents with structured engineering gates."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.14"
+dependencies = [
+    "a2wsgi>=1.10",
+    "flask>=3.0",
+    "mcp>=1.2",
+    "peewee>=3.17",
+    "pyjwt>=2.10,<3",
+    "pyyaml>=6.0.3",
+    "uvicorn>=0.30",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+mcp = [
+    "mcp>=1.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

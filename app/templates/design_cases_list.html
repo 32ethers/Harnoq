@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}{{ _('设计用例 · Harnoq') }}{% endblock %}
+{% block content %}
+<div id="design-cases-list-page" data-project-id="{{ project_id }}">
+  <p class="breadcrumb"><a href="{{ url_for('web.project_detail', project_id=project_id) }}">{{ _('← 返回项目') }}</a></p>
+  {% include "_project_flow_nav.html" %}
+  <h1>{{ _('设计用例') }} <span id="dcl-count" class="count">0</span></h1>
+
+  <button id="dcl-create-btn" class="primary-button" type="button">{{ _('创建设计用例') }}</button>
+  <a id="dcl-requirements-link"
+     class="secondary-button"
+     href="{{ url_for('web.requirement_digest_page', project_id=project_id) }}">{{ _('需求汇总') }}</a>
+  <a id="dcl-nfr-link"
+     class="secondary-button"
+     href="{{ url_for('web.nfr_coverage_page', project_id=project_id) }}">{{ _('NFR 覆盖') }}</a>
+  <div id="dcl-status" class="loading" role="status">{{ _('正在加载设计用例...') }}</div>
+  <div id="dcl-error" class="error hidden" role="alert"></div>
+
+  <div id="dcl-content" class="hidden" aria-live="polite">
+    <div id="dcl-table-section"></div>
+  </div>
+
+  <section id="dcl-trash" class="trash-zone hidden"></section>
+
+  <div id="dcl-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="dcl-modal-title">
+    <div class="modal modal-wide">
+      <h2 id="dcl-modal-title"></h2>
+      <form id="dcl-modal-form" class="modal-form" novalidate>
+        <div>
+          <label for="dcl-feature-id">{{ _('所属功能') }}</label>
+          <select id="dcl-feature-id" name="feature_id" required>
+            <option value="">{{ _('-- 选择所属功能 --') }}</option>
+          </select>
+        </div>
+        <label for="dcl-problem-statement">{{ _('问题陈述') }}</label>
+        <textarea id="dcl-problem-statement" name="problem_statement"></textarea>
+        <div id="dcl-edit-fields" class="hidden">
+          <label for="dcl-mined-requirements">{{ _('需求(挖掘所得)') }}</label>
+          <textarea id="dcl-mined-requirements" name="mined_requirements"></textarea>
+          <label for="dcl-verifies-nfr">{{ _('本设计验证的 NFR') }}</label>
+          <textarea id="dcl-verifies-nfr" name="verifies_nfr"></textarea>
+          <label for="dcl-design-scope">{{ _('设计范围') }}</label>
+          <textarea id="dcl-design-scope" name="design_scope"></textarea>
+          <label for="dcl-non-goals">{{ _('非目标') }}</label>
+          <textarea id="dcl-non-goals" name="non_goals"></textarea>
+          <label for="dcl-assumptions">{{ _('假设') }}</label>
+          <textarea id="dcl-assumptions" name="assumptions"></textarea>
+          <label for="dcl-constraints">{{ _('约束') }}</label>
+          <textarea id="dcl-constraints" name="constraints"></textarea>
+          <label for="dcl-selected-solution">{{ _('选定方案') }}</label>
+          <textarea id="dcl-selected-solution" name="selected_solution"></textarea>
+          <label for="dcl-selection-reason">{{ _('选择理由') }}</label>
+          <textarea id="dcl-selection-reason" name="selection_reason"></textarea>
+          <label for="dcl-risks">{{ _('风险') }}</label>
+          <textarea id="dcl-risks" name="risks"></textarea>
+          <label for="dcl-test-strategy">{{ _('测试策略') }}</label>
+          <textarea id="dcl-test-strategy" name="test_strategy"></textarea>
+          <label for="dcl-acceptance-criteria">{{ _('验收标准') }}</label>
+          <textarea id="dcl-acceptance-criteria" name="acceptance_criteria"></textarea>
+        </div>
+        <div id="dcl-version-panel" class="version-history hidden">
+          <h3>{{ _('历史版本') }}</h3>
+          <p>{{ _('当前版本：') }}<strong id="dcl-display-version">-</strong></p>
+          <div id="dcl-versions-empty" class="hidden empty">{{ _('暂无历史版本。') }}</div>
+          <div id="dcl-versions-table"></div>
+        </div>
+        <span id="dcl-modal-error" class="form-error" role="alert"></span>
+        <div class="modal-actions">
+          <button type="button" id="dcl-modal-cancel">{{ _('取消') }}</button>
+          <button type="submit" id="dcl-modal-submit">{{ _('保存') }}</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
